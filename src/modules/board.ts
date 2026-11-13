@@ -7,18 +7,12 @@
 import { config } from "../../package.json";
 import { getString, getLocaleID } from "../utils/locale";
 import { getPref, setPref } from "../utils/prefs";
-import {
-  CARD_H,
-  CARD_W,
-  REGION_HEADER,
-  REGION_PAD,
-  type SceneStore,
-} from "./scene";
+import type { SceneStore } from "./scene";
+import { computeLayout } from "./layout";
 import { Renderer2D } from "./render2d";
 import { Interaction } from "./interaction";
 
 const TAB_TYPE = `${config.addonRef}-board`;
-const GRID_GAP = 28;
 
 export class Board {
   readonly win: _ZoteroTypes.MainWindow;
@@ -198,74 +192,13 @@ export class Board {
 
   /** Lay cards out in tidy grids inside their folder regions. */
   autoArrange(): void {
-    const regions = [...this.scene.nodes.values()].filter(
-      (n) => n.kind === "collection",
-    );
-    const members = new Map<string, typeof regions>();
-    const unfiled: typeof regions = [];
-    for (const node of this.scene.nodes.values()) {
-      if (node.kind === "collection") {
-        continue;
-      }
-      if (node.parentRegionID && this.scene.nodes.has(node.parentRegionID)) {
-        const list = members.get(node.parentRegionID) ?? [];
-        list.push(node);
-        members.set(node.parentRegionID, list);
-      } else {
-        unfiled.push(node);
-      }
-    }
-
-    const colsPerRow = Math.max(1, Math.ceil(Math.sqrt(regions.length || 1)));
-    const cellW = CARD_W * 3 + 90;
-    const cellH = CARD_H * 3 + 90;
-    regions.forEach((region, i) => {
-      const gx = i % colsPerRow;
-      const gy = Math.floor(i / colsPerRow);
-      region.x = gx * cellW;
-      region.y = gy * cellH;
-      const list = (members.get(region.id) ?? []).sort((a, b) =>
-        a.title.localeCompare(b.title),
-      );
-      list.forEach((node, j) => {
-        const cx = j % 3;
-        const cy = Math.floor(j / 3);
-        node.x = region.x + REGION_PAD + cx * (CARD_W + GRID_GAP);
-        node.y =
-          region.y + REGION_HEADER + REGION_PAD + cy * (CARD_H + GRID_GAP);
-        this.scene.moveSilent(node.id, node.x, node.y);
-      });
-    });
-
-    // Unfiled cards go to the right of the region grid.
-    const unfiledX = colsPerRow * cellW;
-    unfiled
-      .sort((a, b) => a.title.localeCompare(b.title))
-      .forEach((node, j) => {
-        const cx = j % 4;
-        const cy = Math.floor(j / 4);
-        node.x = unfiledX + cx * (CARD_W + GRID_GAP);
-        node.y = cy * (CARD_H + GRID_GAP);
-        this.scene.moveSilent(node.id, node.x, node.y);
-      });
-
-    // Re-stack note cards next to their parents.
-    const noteOffset = new Map<string, number>();
-    for (const node of this.scene.nodes.values()) {
-      if (node.kind !== "note" || !node.linkID) {
-        continue;
-      }
-      const parent = this.scene.nodes.get(node.linkID);
-      if (!parent) {
-        continue;
-      }
-      const index = noteOffset.get(parent.id) ?? 0;
-      noteOffset.set(parent.id, index + 1);
-      node.x = parent.x + CARD_W + GRID_GAP;
-      node.y = parent.y + index * (node.h + GRID_GAP / 2);
+    const nodes = [...this.scene.nodes.values()];
+    // Tidy alphabetical order within each region and the unfiled area.
+    nodes.sort((a, b) => a.title.localeCompare(b.title));
+    computeLayout(nodes);
+    for (const node of nodes) {
       this.scene.moveSilent(node.id, node.x, node.y);
     }
-
     this.scene.recomputeRegions();
     this.zoomToFit();
   }

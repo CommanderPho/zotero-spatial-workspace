@@ -11,7 +11,13 @@ import { getPref } from "../utils/prefs";
 import type { Camera, SceneNode, SceneStore } from "./scene";
 
 const DIR_NAME = "spatialworkspace";
-const LAYOUT_VERSION = 1;
+/**
+ * v2: regions are packed by their real content size (layout.ts). v1 files
+ * stored positions from the old fixed-grid algorithm, where large regions
+ * overlapped their neighbours; those positions are discarded on load so the
+ * board is re-laid-out once with the fixed algorithm.
+ */
+const LAYOUT_VERSION = 2;
 
 interface LayoutFile {
   version: number;
@@ -60,10 +66,17 @@ export class LayoutStore {
       }
       const text = await Zotero.File.getContentsAsync(path);
       const data = JSON.parse(text as string) as LayoutFile;
-      if (data.version !== LAYOUT_VERSION || data.libraryID !== libraryID) {
+      if (data.libraryID !== libraryID) {
         return null;
       }
-      return data;
+      if (data.version === LAYOUT_VERSION) {
+        return data;
+      }
+      if (data.version === 1) {
+        // Overlapping v1 positions: re-layout, but keep the user's camera.
+        return { ...data, version: LAYOUT_VERSION, nodes: [] };
+      }
+      return null;
     } catch (e) {
       ztoolkit.log("Failed to load spatial layout", e);
       return null;

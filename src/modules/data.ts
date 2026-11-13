@@ -15,13 +15,13 @@ import {
   REGION_HEADER,
   REGION_PAD,
   type Camera,
+  type Rect,
   type SceneNode,
   type SceneStore,
 } from "./scene";
 import { applyLayout, type LayoutStore } from "./persistence";
+import { computeLayout, findFreeSpot, GRID_GAP } from "./layout";
 
-const GRID_GAP = 28;
-const REGION_GAP = 90;
 const CHUNK = 250;
 
 export function collectionNodeID(id: number): string {
@@ -117,40 +117,28 @@ export class DataBridge {
     const regionOf = new Map<number, string>();
     const regionNodes = new Map<string, SceneNode>();
 
-    // Collection regions, laid out in a coarse grid; positions are refined
-    // by recomputeRegions() once members are placed.
-    let col = 0;
-    const colsPerRow = Math.max(1, Math.ceil(Math.sqrt(collections.length)));
+    // Collection regions; computeLayout() sizes each region around its
+    // members and packs them without overlap.
     for (const collection of collections) {
       const regionID = collectionNodeID(collection.id);
       regionOf.set(collection.id, regionID);
-      const gx = col % colsPerRow;
-      const gy = Math.floor(col / colsPerRow);
-      const regionNode: SceneNode = {
+      nodes.push({
         id: regionID,
         kind: "collection",
         zoteroID: collection.id,
         libraryID,
-        x: gx * (CARD_W * 3 + REGION_GAP),
-        y: gy * (CARD_H * 3 + REGION_GAP),
+        x: 0,
+        y: 0,
         z: 0,
-        w: CARD_W * 3,
-        h: CARD_H * 3,
+        w: CARD_W + REGION_PAD * 2,
+        h: CARD_H + REGION_PAD * 2 + REGION_HEADER,
         title: collection.name,
         badge: "collection",
-      };
-      nodes.push(regionNode);
-      regionNodes.set(regionID, regionNode);
-      col++;
+      });
     }
 
-    // Regular items: place inside their first collection region, else in
-    // the unfiled area to the right of the region grid.
+    // Regular items: members of their first collection region, else unfiled.
     const items = await Zotero.Items.getAll(libraryID, true, false);
-    const memberCount = new Map<string, number>();
-    let unfiled = 0;
-    const regionCols = Math.max(1, colsPerRow);
-    const unfiledX = regionCols * (CARD_W * 3 + REGION_GAP);
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (!item.isRegularItem()) {
@@ -163,20 +151,6 @@ export class DataBridge {
         : undefined;
       if (regionID) {
         node.parentRegionID = regionID;
-        const index = memberCount.get(regionID) ?? 0;
-        memberCount.set(regionID, index + 1);
-        const gx = index % 3;
-        const gy = Math.floor(index / 3);
-        const region = regionNodes.get(regionID)!;
-        node.x = region.x + REGION_PAD + gx * (CARD_W + GRID_GAP);
-        node.y =
-          region.y + REGION_HEADER + REGION_PAD + gy * (CARD_H + GRID_GAP);
-      } else {
-        const gx = unfiled % 4;
-        const gy = Math.floor(unfiled / 4);
-        node.x = unfiledX + gx * (CARD_W + GRID_GAP);
-        node.y = gy * (CARD_H + GRID_GAP);
-        unfiled++;
       }
       nodes.push(node);
       // Yield periodically so huge libraries don't block the UI thread.
@@ -185,7 +159,8 @@ export class DataBridge {
       }
     }
 
-    // Notes of placed items, offset from their parent card.
+    // Notes of placed items; computeLayout() stacks them in a lane reserved
+    // beside their parent card.
     const itemNodeByID = new Map(
       nodes.filter((n) => n.kind === "item").map((n) => [n.zoteroID, n]),
     );
@@ -194,21 +169,16 @@ export class DataBridge {
       if (!item) {
         continue;
       }
-      const noteIDs = item.getNotes();
-      let noteIndex = 0;
-      for (const noteID of noteIDs) {
+      for (const noteID of item.getNotes()) {
         const note = Zotero.Items.get(noteID);
         if (!note || note.deleted) {
           continue;
         }
-        const node = this.noteToNode(note, itemNode);
-        node.x = itemNode.x + CARD_W + GRID_GAP;
-        node.y = itemNode.y + noteIndex * (NOTE_H + GRID_GAP / 2);
-        nodes.push(node);
-        noteIndex++;
+        nodes.push(this.noteToNode(note, itemNode));
       }
     }
 
+    computeLayout(nodes);
     return nodes;
   }
 
@@ -284,6 +254,7 @@ export class DataBridge {
     switch (event) {
       case "add": {
         const added: SceneNode[] = [];
+        const occupied: Rect[] = [];
         for (const id of ids) {
           const item = Zotero.Items.get(id);
           if (!item || item.libraryID !== libraryID || item.deleted) {
@@ -296,16 +267,19 @@ export class DataBridge {
               : undefined;
             if (parentNode) {
               const node = this.noteToNode(item, parentNode);
-              node.x = parentNode.x + CARD_W + GRID_GAP;
-              node.y = parentNode.y;
+              const spot = this.noteSpot(parentNode, added, occupied);
+              node.x = spot.x;
+              node.y = spot.y;
               added.push(node);
+              occupied.push({ x: node.x, y: node.y, w: node.w, h: node.h });
             }
           } else if (item.isRegularItem()) {
             const node = this.itemToNode(item);
-            const spot = this.freeSpotNearCamera();
+            const spot = this.freeSpotNearCamera(0, occupied);
             node.x = spot.x;
             node.y = spot.y;
             added.push(node);
+            occupied.push({ x: node.x, y: node.y, w: node.w, h: node.h });
           }
         }
         if (added.length) {
@@ -385,12 +359,15 @@ export class DataBridge {
     switch (event) {
       case "add": {
         const added: SceneNode[] = [];
+        const occupied: Rect[] = [];
         for (const id of ids) {
           const collection = Zotero.Collections.get(id);
           if (!collection || collection.libraryID !== libraryID) {
             continue;
           }
-          const spot = this.freeSpotNearCamera();
+          const w = CARD_W + REGION_PAD * 2;
+          const h = CARD_H + REGION_PAD * 2 + REGION_HEADER;
+          const spot = this.freeSpotNearCamera(0, occupied, w, h);
           added.push({
             id: collectionNodeID(id),
             kind: "collection",
@@ -399,11 +376,12 @@ export class DataBridge {
             x: spot.x,
             y: spot.y,
             z: 0,
-            w: CARD_W + REGION_PAD * 2,
-            h: CARD_H + REGION_PAD * 2 + REGION_HEADER,
+            w,
+            h,
             title: collection.name,
             badge: "collection",
           });
+          occupied.push({ x: spot.x, y: spot.y, w, h });
         }
         if (added.length) {
           this.scene.upsertMany(added);
@@ -448,6 +426,7 @@ export class DataBridge {
   /** Add existing library items to the board near the current view. */
   addItems(items: Zotero.Item[]): number {
     const added: SceneNode[] = [];
+    const occupied: Rect[] = [];
     let index = 0;
     for (const item of items) {
       if (item.libraryID !== this.scene.libraryID || item.deleted) {
@@ -460,10 +439,11 @@ export class DataBridge {
           : undefined;
         if (parentNode && !this.scene.nodes.has(noteNodeID(item.id))) {
           const node = this.noteToNode(item, parentNode);
-          node.x = parentNode.x + CARD_W + GRID_GAP;
-          node.y = parentNode.y + index * (NOTE_H + GRID_GAP / 2);
+          const spot = this.noteSpot(parentNode, added, occupied);
+          node.x = spot.x;
+          node.y = spot.y;
           added.push(node);
-          index++;
+          occupied.push({ x: node.x, y: node.y, w: node.w, h: node.h });
         }
         continue;
       }
@@ -471,12 +451,13 @@ export class DataBridge {
         continue;
       }
       const node = this.itemToNode(item);
-      const spot = this.freeSpotNearCamera(index);
+      const spot = this.freeSpotNearCamera(index, occupied);
       node.x = spot.x;
       node.y = spot.y;
       added.push(node);
+      occupied.push({ x: node.x, y: node.y, w: node.w, h: node.h });
       index++;
-      // Bring along child notes.
+      // Bring along child notes, stacked in the lane beside the card.
       let noteIndex = 0;
       for (const noteID of item.getNotes()) {
         const note = Zotero.Items.get(noteID);
@@ -487,6 +468,12 @@ export class DataBridge {
         noteNode.x = node.x + CARD_W + GRID_GAP;
         noteNode.y = node.y + noteIndex * (NOTE_H + GRID_GAP / 2);
         added.push(noteNode);
+        occupied.push({
+          x: noteNode.x,
+          y: noteNode.y,
+          w: noteNode.w,
+          h: noteNode.h,
+        });
         noteIndex++;
       }
     }
@@ -498,14 +485,37 @@ export class DataBridge {
     return added.length;
   }
 
-  private freeSpotNearCamera(index = 0): { x: number; y: number } {
+  /** Preferred spot near the view center, nudged until collision-free. */
+  private freeSpotNearCamera(
+    index = 0,
+    occupied: Rect[] = [],
+    w = CARD_W,
+    h = CARD_H,
+  ): { x: number; y: number } {
     const cam = this.scene.camera;
     const gx = index % 4;
     const gy = Math.floor(index / 4);
-    return {
+    const preferred = {
       x: cam.x + 60 + gx * (CARD_W + GRID_GAP),
       y: cam.y + 60 + gy * (CARD_H + GRID_GAP),
     };
+    return findFreeSpot(this.scene, w, h, preferred, occupied);
+  }
+
+  /** Next free slot in the note lane beside a parent card. */
+  private noteSpot(
+    parent: SceneNode,
+    added: SceneNode[],
+    occupied: Rect[],
+  ): { x: number; y: number } {
+    const laneX = parent.x + parent.w + GRID_GAP;
+    let y = parent.y;
+    for (const node of [...this.scene.nodes.values(), ...added]) {
+      if (node.kind === "note" && node.linkID === parent.id) {
+        y = Math.max(y, node.y + node.h + GRID_GAP / 2);
+      }
+    }
+    return findFreeSpot(this.scene, NOTE_W, NOTE_H, { x: laneX, y }, occupied);
   }
 }
 
