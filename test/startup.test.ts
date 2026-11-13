@@ -108,4 +108,40 @@ describe("startup", function () {
     assert.isNotEmpty(board, "board should be registered");
     assert.isTrue(board!.isOpen, "board tab should be open");
   });
+
+  it("should resolve the selected library without the removed getSelectedLibraryID()", async function () {
+    this.timeout(30000);
+    const instance = Zotero[config.addonInstance];
+    const pane = Zotero.getActiveZoteroPane()!;
+    assert.isNotEmpty(pane, "active pane should be available");
+    const libraryID = Zotero.Libraries.userLibraryID;
+    await pane.collectionsView.selectByID(`R${libraryID}`);
+
+    // Drop the scene so openBoard() must resolve the library from the pane
+    // selection instead of reusing the previously loaded library.
+    instance.data.scene!.reset([], 0);
+
+    // The singular getter was removed upstream in favor of the plural one;
+    // make any call to it fail loudly instead of silently warning.
+    const original = pane.getSelectedLibraryID;
+    pane.getSelectedLibraryID = () => {
+      throw new Error(
+        "getSelectedLibraryID() was removed -- use getSelectedLibraryIDs()",
+      );
+    };
+    try {
+      await instance.api.openBoard();
+    } finally {
+      pane.getSelectedLibraryID = original;
+    }
+    assert.equal(
+      instance.data.scene!.libraryID,
+      libraryID,
+      "openBoard() should load the library selected in the collections tree",
+    );
+    assert.isTrue(
+      instance.data.boards.get(Zotero.getMainWindow())!.isOpen,
+      "board tab should be open",
+    );
+  });
 });

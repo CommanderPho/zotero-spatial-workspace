@@ -225,7 +225,8 @@ export function findFreeSpot(
     if (occupied.some((o) => rectsIntersect(rect, o))) {
       return false;
     }
-    return scene.queryRect(rect).length === 0;
+    // Hidden (filtered) cards still occupy their spots on the board.
+    return scene.queryRect(rect, true).length === 0;
   };
   if (isClear(preferred.x, preferred.y)) {
     return { x: preferred.x, y: preferred.y };

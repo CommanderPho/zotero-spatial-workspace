@@ -201,6 +201,9 @@ export class DataBridge {
       badge: item.itemTypeID
         ? Zotero.ItemTypes.getName(item.itemTypeID)
         : undefined,
+      added: sqlDateToMs(item.dateAdded),
+      modified: sqlDateToMs(item.dateModified),
+      read: itemLastReadMs(item),
     };
   }
 
@@ -225,6 +228,8 @@ export class DataBridge {
       linkID: parent.id,
       title: text.slice(0, 140) || "(empty note)",
       badge: "note",
+      added: sqlDateToMs(note.dateAdded),
+      modified: sqlDateToMs(note.dateModified),
     };
   }
 
@@ -302,6 +307,9 @@ export class DataBridge {
             itemNode.title = fresh.title;
             itemNode.subtitle = fresh.subtitle;
             itemNode.badge = fresh.badge;
+            itemNode.added = fresh.added;
+            itemNode.modified = fresh.modified;
+            itemNode.read = fresh.read;
             changed = true;
           }
           const noteNode = this.scene.nodes.get(noteNodeID(id));
@@ -313,11 +321,25 @@ export class DataBridge {
             if (parentNode) {
               const fresh = this.noteToNode(item, parentNode);
               noteNode.title = fresh.title;
+              noteNode.added = fresh.added;
+              noteNode.modified = fresh.modified;
+              changed = true;
+            }
+          }
+          // Reading an attachment updates the parent card's read time.
+          if (item.isAttachment()) {
+            const parent = item.parentItem || undefined;
+            const parentNode = parent
+              ? this.scene.nodes.get(itemNodeID(parent.id))
+              : undefined;
+            if (parent && parentNode) {
+              parentNode.read = itemLastReadMs(parent);
               changed = true;
             }
           }
         }
         if (changed) {
+          this.scene.refreshFilter();
           this.scene.endBatch();
           this.onSceneChanged();
         }
@@ -400,6 +422,7 @@ export class DataBridge {
           }
         }
         if (changed) {
+          this.scene.refreshFilter();
           this.scene.endBatch();
           this.onSceneChanged();
         }
@@ -415,6 +438,7 @@ export class DataBridge {
           }
         }
         this.scene.removeMany(removed);
+        this.scene.refreshFilter();
         this.onSceneChanged();
         break;
       }
@@ -525,6 +549,36 @@ function extractYear(date: string | undefined): string {
   }
   const match = date.match(/\d{4}/);
   return match ? match[0] : "";
+}
+
+/** Zotero SQL datetime ("2024-05-01 12:00:00", UTC) -> epoch ms. */
+function sqlDateToMs(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const date = Zotero.Date.sqlToDate(value, true);
+  return date ? date.getTime() : undefined;
+}
+
+/**
+ * Last-read time (epoch ms) matching Zotero's "Last Read" column:
+ * the newest attachmentLastRead among the item's attachments.
+ * Undefined when the item was never read.
+ */
+function itemLastReadMs(item: Zotero.Item): number | undefined {
+  let maxSeconds: number | undefined;
+  if (item.isAttachment()) {
+    maxSeconds = item.attachmentLastRead ?? undefined;
+  } else if (item.isRegularItem()) {
+    for (const attachmentID of item.getAttachments()) {
+      const attachment = Zotero.Items.get(attachmentID);
+      const lastRead = attachment ? attachment.attachmentLastRead : null;
+      if (lastRead && (!maxSeconds || lastRead > maxSeconds)) {
+        maxSeconds = lastRead;
+      }
+    }
+  }
+  return maxSeconds ? maxSeconds * 1000 : undefined;
 }
 
 function defaultCamera(scene: SceneStore): Camera {

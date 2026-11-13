@@ -25,8 +25,17 @@ view can be added in a later release.
   double-click a card to open the item in Zotero.
 - **Add from the library** — select items, right-click → "Add to Spatial
   Workspace". New items land near the current view.
+- **Temporary filters** — a toolbar search box hides non-matching cards
+  without moving anything; clearing it restores the board exactly.
+  Query terms: bare words (title/creator/type), `title:`, `author:`,
+  `type:`, `kind:item|note|collection`, and date terms `added:`,
+  `modified:`, `read:` with comparisons (`added:>2024-01-01`,
+  `read:>7d`, `added:never`, `read:any`). Relative dates: `d`/`w`/`m`/`y`,
+  `today`. `Ctrl/Cmd+F` focuses the box, `Esc` clears the filter.
+  "Read" matches Zotero's Last Read column (newest attachment read time).
 - **Auto-arrange & zoom-to-fit** — toolbar buttons lay cards out in tidy grids
-  inside their folder regions, or fit the whole board in view.
+  inside their folder regions, or fit the whole board in view (with a filter
+  active, Fit frames only the matches).
 - **Persistent layout** — positions, regions, and camera are saved per library
   under `<Zotero data directory>/spatialworkspace/layout-<libraryID>.json`
   (debounced, atomic writes) and restored on startup.
@@ -46,10 +55,11 @@ view can be added in a later release.
 | Shift-click / marquee | Multi-select                                       |
 | Double-click card     | Open item in Zotero                                |
 | Delete                | Remove selection from board (items stay in Zotero) |
-| Esc                   | Clear selection                                    |
+| Esc                   | Clear filter (if active) and selection             |
+| Ctrl/Cmd+F            | Focus the filter box                               |
 | Ctrl/Cmd+Shift+W      | Open/focus the board                               |
 
-Toolbar: auto-arrange, zoom-to-fit, toggle notes.
+Toolbar: auto-arrange, zoom-to-fit, toggle notes, temporary filter box.
 
 Preferences (Settings → Spatial Workspace): autosave delay, show notes,
 label detail.
@@ -71,7 +81,10 @@ lives in the Zotero **data** directory, so it survives profile resets.
 Architecture (all under `src/modules/`):
 
 - `scene.ts` — renderer-agnostic scene store (nodes, regions, spatial hash,
-  dirty flags). The seam for a future `render3d.ts`.
+  dirty flags, temporary visibility filter). The seam for a future
+  `render3d.ts`.
+- `filter.ts` — pure filter query parser/matcher (title, kind, added /
+  modified / read dates); no Zotero dependencies.
 - `persistence.ts` — per-library JSON layout, debounced atomic saves.
 - `data.ts` — Zotero → scene bridge with notifier-driven live sync.
 - `render2d.ts` — Canvas2D renderer (culling, LOD, cached text metrics).

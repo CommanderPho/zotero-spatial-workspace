@@ -4,6 +4,7 @@ prefs-title = Spatial Workspace
 board-tab-title = Spatial Workspace
 board-status-empty = No items on the board yet. Right-click items in your library and choose “Add to Spatial Workspace”.
 board-status-count = { $count } items on board
+board-status-filtered = { $visible } of { $total } items shown (filtered)
 board-removed = Removed { $count } items from the board (they remain in Zotero)
 board-added = Added { $count } items to the board
 board-nothing-selected = No library items selected

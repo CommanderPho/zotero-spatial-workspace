@@ -9,6 +9,7 @@ import { getString, getLocaleID } from "../utils/locale";
 import { getPref, setPref } from "../utils/prefs";
 import type { SceneStore } from "./scene";
 import { computeLayout } from "./layout";
+import { parseFilter } from "./filter";
 import { Renderer2D } from "./render2d";
 import { Interaction } from "./interaction";
 
@@ -21,6 +22,8 @@ export class Board {
   private root?: HTMLElement;
   private canvas?: HTMLCanvasElement;
   private statusEl?: HTMLElement;
+  private filterInput?: HTMLInputElement;
+  private filterClearBtn?: HTMLButtonElement;
   private renderer?: Renderer2D;
   private interaction?: Interaction;
   private resizeObserver?: ResizeObserver;
@@ -86,11 +89,52 @@ export class Board {
       setPref("showNotes", getPref("showNotes") === false);
       this.refresh();
     });
+
+    // Temporary visibility filter: hides non-matching cards without
+    // touching positions or the saved layout.
+    const filterInput = ztoolkit.UI.createElement(doc, "input", {
+      classList: [`${config.addonRef}-filter-input`],
+      attributes: {
+        type: "search",
+        "data-l10n-id": getLocaleID("board-filter-placeholder"),
+      },
+      listeners: [
+        {
+          type: "input",
+          listener: () => this.applyFilter(filterInput.value),
+        },
+        {
+          type: "keydown",
+          listener: (ev: KeyboardEvent) => {
+            if (ev.key === "Escape") {
+              ev.stopPropagation();
+              this.clearFilter();
+              this.canvas?.focus();
+            }
+          },
+        },
+      ],
+    });
+    this.filterInput = filterInput;
+    const filterClearBtn = this.toolbarButton(doc, "board-filter-clear", () =>
+      this.clearFilter(),
+    );
+    filterClearBtn.classList.add(`${config.addonRef}-filter-clear`);
+    filterClearBtn.style.display = "none";
+    this.filterClearBtn = filterClearBtn;
+
     const status = ztoolkit.UI.createElement(doc, "span", {
       classList: [`${config.addonRef}-status`],
     });
     this.statusEl = status;
-    toolbar.append(arrangeBtn, fitBtn, notesBtn, status);
+    toolbar.append(
+      arrangeBtn,
+      fitBtn,
+      notesBtn,
+      filterInput,
+      filterClearBtn,
+      status,
+    );
 
     // Canvas + tooltip
     const wrap = ztoolkit.UI.createElement(doc, "div", {
@@ -114,6 +158,13 @@ export class Board {
       this.scene,
       this.renderer,
       tooltip,
+      {
+        onFocusFilter: () => {
+          this.filterInput?.focus();
+          this.filterInput?.select();
+        },
+        onClearFilter: () => this.clearFilter(),
+      },
     );
 
     this.resizeObserver = new this.win.ResizeObserver(() => this.syncSize());
@@ -123,9 +174,22 @@ export class Board {
     this.unsubscribeScene = this.scene.onChange(() => {
       this.renderer?.requestDraw();
       this.updateStatus();
+      this.syncFilterUI();
     });
+    this.syncFilterUI();
     this.updateStatus();
     this.renderer.requestDraw();
+  }
+
+  /** Mirror the shared scene filter into this board's toolbar controls. */
+  private syncFilterUI(): void {
+    const raw = this.scene.filter.raw;
+    if (this.filterInput && this.filterInput.value !== raw) {
+      this.filterInput.value = raw;
+    }
+    if (this.filterClearBtn) {
+      this.filterClearBtn.style.display = raw ? "" : "none";
+    }
   }
 
   private toolbarButton(
@@ -170,20 +234,48 @@ export class Board {
     this.renderer?.requestDraw();
   }
 
+  /** Apply a temporary visibility filter from the toolbar query text. */
+  applyFilter(query: string): void {
+    this.scene.setFilter(parseFilter(query));
+    if (this.filterClearBtn) {
+      this.filterClearBtn.style.display = query.trim() ? "" : "none";
+    }
+    this.updateStatus();
+    this.renderer?.requestDraw();
+  }
+
+  clearFilter(): void {
+    if (this.filterInput) {
+      this.filterInput.value = "";
+    }
+    this.applyFilter("");
+  }
+
   private updateStatus(): void {
     if (!this.statusEl) {
       return;
     }
-    let count = 0;
+    let total = 0;
+    let visible = 0;
     for (const node of this.scene.nodes.values()) {
-      if (node.kind !== "collection") {
-        count++;
+      if (node.kind === "collection") {
+        continue;
+      }
+      total++;
+      if (!this.scene.isHidden(node.id)) {
+        visible++;
       }
     }
+    if (this.scene.filter.active) {
+      this.statusEl.textContent = getString("board-status-filtered", {
+        args: { visible, total },
+      });
+      return;
+    }
     this.statusEl.textContent =
-      count === 0
+      total === 0
         ? getString("board-status-empty")
-        : getString("board-status-count", { args: { count } });
+        : getString("board-status-count", { args: { count: total } });
   }
 
   zoomToFit(): void {
@@ -224,6 +316,8 @@ export class Board {
     this.root?.remove();
     this.root = undefined;
     this.canvas = undefined;
+    this.filterInput = undefined;
+    this.filterClearBtn = undefined;
     this.renderer = undefined;
     this.interaction = undefined;
   }

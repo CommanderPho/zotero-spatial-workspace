@@ -7,6 +7,13 @@
  * for that) and the same dirty-flag protocol.
  */
 
+import {
+  EMPTY_FILTER,
+  nodeMatchesFilter,
+  regionNameMatchesFilter,
+  type NodeFilter,
+} from "./filter";
+
 export type NodeKind = "collection" | "item" | "note";
 
 export interface SceneNode {
@@ -30,6 +37,15 @@ export interface SceneNode {
   subtitle?: string;
   /** Item type name or note marker, used for card accents. */
   badge?: string;
+  /** Zotero dateAdded, epoch ms. Undefined when unknown. */
+  added?: number;
+  /** Zotero dateModified, epoch ms. Undefined when unknown. */
+  modified?: number;
+  /**
+   * Last read time, epoch ms: max attachmentLastRead over the item's
+   * attachments (Zotero's "Last Read" column). Undefined = never read.
+   */
+  read?: number;
 }
 
 export interface Rect {
@@ -151,6 +167,16 @@ export class SceneStore {
   libraryID = 0;
   /** Bumped on any change; renderers use it as a dirty flag. */
   revision = 0;
+  /**
+   * Temporary visibility filter (view state only, never persisted).
+   * Empty filter = everything visible.
+   */
+  filter: NodeFilter = EMPTY_FILTER;
+  /**
+   * Ids hidden by the active filter. Maintained by setFilter()/reset();
+   * membership tests are O(1) for the renderer, hit-testing, and queries.
+   */
+  private hidden = new Set<string>();
 
   private listeners = new Set<() => void>();
 
@@ -166,31 +192,168 @@ export class SceneStore {
     }
   }
 
-  /** Replace all nodes (library load / layout restore). */
+  /** Replace all nodes (library load / layout restore). Clears the filter. */
   reset(nodes: SceneNode[], libraryID: number): void {
     this.nodes.clear();
     this.selection.clear();
     this.hash.clear();
     this.libraryID = libraryID;
+    this.filter = EMPTY_FILTER;
+    this.hidden.clear();
     for (const node of nodes) {
       this.nodes.set(node.id, node);
       this.hash.insert(node);
     }
     this.emit();
+  }
+
+  /**
+   * Apply (or clear, with an inactive filter) the temporary visibility
+   * filter. Hidden nodes keep their positions and stay in the scene;
+   * they are skipped by rendering, hit-testing, and rect queries.
+   *
+   * Rules: items/notes must match every term. A region stays visible when
+   * its own name matches or it has at least one matching member; regions
+   * never reveal non-matching members.
+   */
+  setFilter(filter: NodeFilter): number {
+    this.filter = filter;
+    this.hidden.clear();
+    let visibleCount = 0;
+    if (filter.active) {
+      const regionHasMatch = new Set<string>();
+      for (const node of this.nodes.values()) {
+        if (node.kind === "collection") {
+          continue;
+        }
+        if (nodeMatchesFilter(node, filter)) {
+          visibleCount++;
+          if (node.parentRegionID) {
+            regionHasMatch.add(node.parentRegionID);
+          }
+        } else {
+          this.hidden.add(node.id);
+        }
+      }
+      for (const node of this.nodes.values()) {
+        if (
+          node.kind === "collection" &&
+          !regionHasMatch.has(node.id) &&
+          !regionNameMatchesFilter(node, filter)
+        ) {
+          this.hidden.add(node.id);
+        }
+      }
+      // Selection must not reference invisible nodes.
+      for (const id of [...this.selection]) {
+        if (this.hidden.has(id)) {
+          this.selection.delete(id);
+        }
+      }
+    } else {
+      for (const node of this.nodes.values()) {
+        if (node.kind !== "collection") {
+          visibleCount++;
+        }
+      }
+    }
+    this.emit();
+    return visibleCount;
+  }
+
+  /** True when the node is currently hidden by the filter. */
+  isHidden(id: string): boolean {
+    return this.hidden.has(id);
+  }
+
+  /** Number of nodes hidden by the active filter. */
+  get hiddenCount(): number {
+    return this.hidden.size;
   }
 
   upsert(node: SceneNode): void {
     this.nodes.set(node.id, node);
     this.hash.insert(node);
+    if (this.filter.active && node.kind === "collection") {
+      this.setFilter(this.filter);
+    } else {
+      this.refreshHidden(node);
+    }
     this.emit();
   }
 
   upsertMany(nodes: SceneNode[]): void {
+    let hasRegion = false;
+    const touchedRegions = new Set<string>();
     for (const node of nodes) {
       this.nodes.set(node.id, node);
       this.hash.insert(node);
+      hasRegion ||= node.kind === "collection";
+      this.refreshHidden(node, touchedRegions);
+    }
+    if (this.filter.active && hasRegion) {
+      this.setFilter(this.filter);
+    } else {
+      for (const regionID of touchedRegions) {
+        this.refreshRegionHidden(regionID);
+      }
     }
     this.emit();
+  }
+
+  /** Re-evaluate the active filter after in-place node edits. */
+  refreshFilter(): void {
+    if (this.filter.active) {
+      this.setFilter(this.filter);
+    }
+  }
+
+  /**
+   * Keep filter visibility consistent when a non-region node changes.
+   * `touchedRegions` defers region re-evaluation to the caller (bulk path).
+   */
+  private refreshHidden(node: SceneNode, touchedRegions?: Set<string>): void {
+    if (!this.filter.active || node.kind === "collection") {
+      return;
+    }
+    if (nodeMatchesFilter(node, this.filter)) {
+      this.hidden.delete(node.id);
+    } else {
+      this.hidden.add(node.id);
+      this.selection.delete(node.id);
+    }
+    if (node.parentRegionID) {
+      if (touchedRegions) {
+        touchedRegions.add(node.parentRegionID);
+      } else {
+        this.refreshRegionHidden(node.parentRegionID);
+      }
+    }
+  }
+
+  /** A region stays visible while its name or any member matches. */
+  private refreshRegionHidden(regionID: string): void {
+    const region = this.nodes.get(regionID);
+    if (!region || region.kind !== "collection") {
+      return;
+    }
+    let memberMatched = false;
+    for (const node of this.nodes.values()) {
+      if (
+        node.kind !== "collection" &&
+        node.parentRegionID === regionID &&
+        !this.hidden.has(node.id)
+      ) {
+        memberMatched = true;
+        break;
+      }
+    }
+    if (memberMatched || regionNameMatchesFilter(region, this.filter)) {
+      this.hidden.delete(regionID);
+    } else {
+      this.hidden.add(regionID);
+      this.selection.delete(regionID);
+    }
   }
 
   remove(id: string): void {
@@ -199,6 +362,7 @@ export class SceneStore {
     }
     this.hash.remove(id);
     this.selection.delete(id);
+    this.hidden.delete(id);
     this.emit();
   }
 
@@ -208,6 +372,7 @@ export class SceneStore {
       if (this.nodes.delete(id)) {
         this.hash.remove(id);
         this.selection.delete(id);
+        this.hidden.delete(id);
         changed = true;
       }
     }
@@ -242,7 +407,7 @@ export class SceneStore {
       this.selection.clear();
     }
     for (const id of ids) {
-      if (this.nodes.has(id)) {
+      if (this.nodes.has(id) && !this.hidden.has(id)) {
         this.selection.add(id);
       }
     }
@@ -252,7 +417,7 @@ export class SceneStore {
   toggleSelect(id: string): void {
     if (this.selection.has(id)) {
       this.selection.delete(id);
-    } else if (this.nodes.has(id)) {
+    } else if (this.nodes.has(id) && !this.hidden.has(id)) {
       this.selection.add(id);
     }
     this.emit();
@@ -266,13 +431,13 @@ export class SceneStore {
     this.emit();
   }
 
-  /** Topmost node at a world point (notes/items above regions). */
+  /** Topmost visible node at a world point (notes/items above regions). */
   hitTest(x: number, y: number): SceneNode | undefined {
     const candidates = this.hash.query({ x, y, w: 0, h: 0 });
     let best: SceneNode | undefined;
     for (const id of candidates) {
       const node = this.nodes.get(id);
-      if (!node || !pointInRect(x, y, node)) {
+      if (!node || this.hidden.has(id) || !pointInRect(x, y, node)) {
         continue;
       }
       if (!best || rank(node) > rank(best)) {
@@ -282,25 +447,39 @@ export class SceneStore {
     return best;
   }
 
-  /** Nodes whose AABB intersects a world rect, filtered to exact overlap. */
-  queryRect(rect: Rect): SceneNode[] {
+  /**
+   * Visible nodes whose AABB intersects a world rect, filtered to exact
+   * overlap. Hidden nodes are skipped unless `includeHidden` is set
+   * (layout/collision code needs the full board).
+   */
+  queryRect(rect: Rect, includeHidden = false): SceneNode[] {
     const out: SceneNode[] = [];
     for (const id of this.hash.query(rect)) {
       const node = this.nodes.get(id);
-      if (node && rectsIntersect(node, rect)) {
+      if (
+        node &&
+        (includeHidden || !this.hidden.has(id)) &&
+        rectsIntersect(node, rect)
+      ) {
         out.push(node);
       }
     }
     return out;
   }
 
-  /** Bounding box of all nodes (regions included), or null when empty. */
+  /**
+   * Bounding box of visible nodes (regions included), or null when empty.
+   * With a filter active, zoom-to-fit frames only the matches.
+   */
   bounds(): Rect | null {
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const node of this.nodes.values()) {
+      if (this.hidden.has(node.id)) {
+        continue;
+      }
       minX = Math.min(minX, node.x);
       minY = Math.min(minY, node.y);
       maxX = Math.max(maxX, node.x + node.w);

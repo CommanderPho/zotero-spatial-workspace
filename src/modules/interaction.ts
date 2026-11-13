@@ -17,11 +17,19 @@ import { getString } from "../utils/locale";
 
 type DragMode = "pan" | "move" | "marquee" | null;
 
+export interface InteractionOptions {
+  /** Ctrl/Cmd+F: focus the toolbar filter input. */
+  onFocusFilter?: () => void;
+  /** Esc with an active filter: clear it. */
+  onClearFilter?: () => void;
+}
+
 export class Interaction {
   private canvas: HTMLCanvasElement;
   private scene: SceneStore;
   private renderer: Renderer2D;
   private tooltip: HTMLElement;
+  private options: InteractionOptions;
   private mode: DragMode = null;
   private lastX = 0;
   private lastY = 0;
@@ -40,11 +48,13 @@ export class Interaction {
     scene: SceneStore,
     renderer: Renderer2D,
     tooltip: HTMLElement,
+    options: InteractionOptions = {},
   ) {
     this.canvas = canvas;
     this.scene = scene;
     this.renderer = renderer;
     this.tooltip = tooltip;
+    this.options = options;
     this.bind();
   }
 
@@ -139,17 +149,24 @@ export class Interaction {
       this.scene.select([node.id]);
     }
 
+    let hiddenRegionMembers: string[] = [];
     if (node.kind === "collection") {
-      // Dragging a region moves the region and everything inside it.
+      // Dragging a region moves the region and everything inside it,
+      // including cards currently hidden by the filter (they keep their
+      // relative positions), but only visible members become selected.
       const members = this.scene
-        .queryRect(node)
+        .queryRect(node, true)
         .filter((n) => n.kind !== "collection" && n.parentRegionID === node.id);
-      this.scene.select([node.id, ...members.map((n) => n.id)]);
+      const visible = members.filter((n) => !this.scene.isHidden(n.id));
+      hiddenRegionMembers = members
+        .filter((n) => this.scene.isHidden(n.id))
+        .map((n) => n.id);
+      this.scene.select([node.id, ...visible.map((n) => n.id)]);
     }
 
     this.mode = "move";
     this.dragOrigins.clear();
-    for (const id of this.scene.selection) {
+    for (const id of [...this.scene.selection, ...hiddenRegionMembers]) {
       const n = this.scene.nodes.get(id);
       if (n) {
         this.dragOrigins.set(id, { x: n.x, y: n.y });
@@ -253,9 +270,19 @@ export class Interaction {
 
   private onKeyDown(ev: KeyboardEvent): void {
     if (ev.key === "Escape") {
+      if (this.scene.filter.active && this.options.onClearFilter) {
+        this.options.onClearFilter();
+      }
       this.scene.clearSelection();
       this.renderer.marquee = null;
       this.renderer.requestDraw();
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "f") {
+      if (this.options.onFocusFilter) {
+        ev.preventDefault();
+        this.options.onFocusFilter();
+      }
       return;
     }
     if (ev.key === "Delete" || (Zotero.isMac && ev.key === "Backspace")) {
@@ -277,7 +304,7 @@ export class Interaction {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a") {
       ev.preventDefault();
       const ids = [...this.scene.nodes.values()]
-        .filter((n) => n.kind !== "collection")
+        .filter((n) => n.kind !== "collection" && !this.scene.isHidden(n.id))
         .map((n) => n.id);
       this.scene.select(ids);
     }

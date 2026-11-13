@@ -7,6 +7,22 @@ import { config } from "../../package.json";
 import { getLocaleID, getString } from "../utils/locale";
 import { Board } from "./board";
 
+/**
+ * Library of the current collection-tree selection, or undefined when no
+ * library is selected. Uses getSelectedLibraryIDs(), which replaced the
+ * removed getSelectedLibraryID() for multi-library selection; falls back to
+ * the singular method on Zotero versions that predate the plural API.
+ */
+function getSelectedLibraryID(
+  pane: _ZoteroTypes.ZoteroPane,
+): number | undefined {
+  const ids = pane.getSelectedLibraryIDs?.();
+  if (Array.isArray(ids)) {
+    return ids[0];
+  }
+  return pane.getSelectedLibraryID?.() || undefined;
+}
+
 const MENU_IDS = [
   `${config.addonRef}-tools-open`,
   `${config.addonRef}-item-add`,
@@ -49,10 +65,11 @@ export function registerCommands(win: _ZoteroTypes.MainWindow): void {
 
   addon.api.openBoard = async (libraryID?: number) => {
     const win = Zotero.getMainWindow();
+    const pane = Zotero.getActiveZoteroPane();
     const targetLibrary =
       libraryID ??
       (addon.data.scene?.libraryID ||
-        Zotero.getActiveZoteroPane()?.getSelectedLibraryID() ||
+        (pane && getSelectedLibraryID(pane)) ||
         Zotero.Libraries.userLibraryID);
     if (
       !addon.data.scene ||

@@ -361,7 +361,7 @@ export class Renderer2D {
       return;
     }
     const parent = this.scene.nodes.get(note.linkID);
-    if (!parent) {
+    if (!parent || this.scene.isHidden(parent.id)) {
       return;
     }
     const ctx = this.ctx;

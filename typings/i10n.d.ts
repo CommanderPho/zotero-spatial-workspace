@@ -4,10 +4,13 @@
 // @ts-nocheck
 export type FluentMessageId =
   | 'board-added'
+  | 'board-filter-clear'
+  | 'board-filter-placeholder'
   | 'board-nothing-selected'
   | 'board-removed'
   | 'board-status-count'
   | 'board-status-empty'
+  | 'board-status-filtered'
   | 'board-tab-title'
   | 'board-toolbar-arrange'
   | 'board-toolbar-fit'
