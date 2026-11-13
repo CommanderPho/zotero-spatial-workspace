@@ -1,0 +1,72 @@
+/* Spatial Workspace board styles. All classes are prefixed to avoid
+ * collisions with Zotero's own styles. */
+
+.spatialworkspace-board-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--material-background, #fff);
+  color: var(--fill-primary, #1a1a1a);
+}
+
+.spatialworkspace-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--fill-quinary, rgba(0, 0, 0, 0.12));
+  user-select: none;
+}
+
+.spatialworkspace-toolbar button {
+  appearance: none;
+  border: 1px solid var(--fill-quinary, rgba(0, 0, 0, 0.15));
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.spatialworkspace-toolbar button:hover {
+  background: var(--fill-quinary, rgba(0, 0, 0, 0.06));
+}
+
+.spatialworkspace-status {
+  margin-inline-start: auto;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.spatialworkspace-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.spatialworkspace-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+  touch-action: none;
+}
+
+.spatialworkspace-tooltip {
+  position: absolute;
+  display: none;
+  max-width: 320px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--material-tooltip, rgba(30, 30, 30, 0.92));
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+  z-index: 10;
+  white-space: normal;
+}

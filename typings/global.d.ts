@@ -16,3 +16,7 @@ declare const rootURI: string;
 declare const addon: import("../src/addon").default;
 
 declare const __env__: "production" | "development";
+
+// Window globals provided by the Zotero main window at runtime.
+declare const ZoteroPane: _ZoteroTypes.ZoteroPane;
+declare const Zotero_Tabs: _ZoteroTypes.Zotero_Tabs;

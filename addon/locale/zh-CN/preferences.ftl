@@ -1,5 +1,12 @@
-pref-title = 插件模板设置示例
-pref-enable =
-    .label = 开启
-pref-input = 输入
-pref-help = { $name } Build { $version } { $time }
+pref-title = 空间工作区
+pref-autosave = 布局保存延迟（毫秒）
+pref-shownotes =
+    .label = 在面板上显示笔记卡片
+pref-labeldetail = 卡片标签详细程度
+pref-labeldetail-auto =
+    .label = 自动（随缩放变化）
+pref-labeldetail-full =
+    .label = 始终完整
+pref-labeldetail-minimal =
+    .label = 最简
+pref-help = { $name } 构建 { $version } { $time }

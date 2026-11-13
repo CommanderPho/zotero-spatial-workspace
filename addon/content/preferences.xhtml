@@ -5,24 +5,38 @@
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
 >
   <label><html:h2 data-l10n-id="pref-title"></html:h2></label>
-  <checkbox
-    id="zotero-prefpane-__addonRef__-enable"
-    preference="enable"
-    data-l10n-id="pref-enable"
-  />
-  <hbox>
+  <hbox align="center">
     <html:label
-      for="zotero-prefpane-__addonRef__-input"
-      data-l10n-id="pref-input"
+      for="zotero-prefpane-__addonRef__-autosave"
+      data-l10n-id="pref-autosave"
     ></html:label>
     <html:input
-      type="text"
-      id="zotero-prefpane-__addonRef__-input"
-      preference="input"
+      type="number"
+      min="100"
+      max="10000"
+      step="100"
+      id="zotero-prefpane-__addonRef__-autosave"
+      preference="autosaveDelayMs"
     ></html:input>
   </hbox>
-  <hbox class="virtualized-table-container" flex="1" height="300px">
-    <html:div id="__addonRef__-table-container" />
+  <checkbox
+    id="zotero-prefpane-__addonRef__-shownotes"
+    preference="showNotes"
+    data-l10n-id="pref-shownotes"
+  />
+  <hbox align="center">
+    <html:label
+      for="zotero-prefpane-__addonRef__-labeldetail"
+      data-l10n-id="pref-labeldetail"
+    ></html:label>
+    <html:select
+      id="zotero-prefpane-__addonRef__-labeldetail"
+      preference="labelDetail"
+    >
+      <html:option value="auto" data-l10n-id="pref-labeldetail-auto" />
+      <html:option value="full" data-l10n-id="pref-labeldetail-full" />
+      <html:option value="minimal" data-l10n-id="pref-labeldetail-minimal" />
+    </html:select>
   </hbox>
 </groupbox>
 <vbox>

@@ -1,5 +1,12 @@
-pref-title = Addon Template Example
-pref-enable =
-    .label = Enable
-pref-input = Input
+pref-title = Spatial Workspace
+pref-autosave = Save layout after (ms)
+pref-shownotes =
+    .label = Show note cards on the board
+pref-labeldetail = Card label detail
+pref-labeldetail-auto =
+    .label = Automatic (zoom-dependent)
+pref-labeldetail-full =
+    .label = Always full
+pref-labeldetail-minimal =
+    .label = Minimal
 pref-help = { $name } Build { $version } { $time }

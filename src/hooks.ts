@@ -1,12 +1,11 @@
-import {
-  BasicExampleFactory,
-  HelperExampleFactory,
-  KeyExampleFactory,
-  UIExampleFactory,
-} from "./modules/examples";
 import { getString, initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
+import { SceneStore } from "./modules/scene";
+import { LayoutStore } from "./modules/persistence";
+import { DataBridge } from "./modules/data";
+import { Board } from "./modules/board";
+import { registerCommands, unregisterCommands } from "./modules/commands";
 
 async function onStartup() {
   await Promise.all([
@@ -17,21 +16,22 @@ async function onStartup() {
 
   initLocale();
 
-  BasicExampleFactory.registerPrefs();
+  registerPrefsPane();
 
-  BasicExampleFactory.registerNotifier();
+  addon.data.scene = new SceneStore();
+  addon.data.layout = new LayoutStore(addon.data.scene);
+  addon.data.bridge = new DataBridge(
+    addon.data.scene,
+    addon.data.layout,
+    () => {
+      for (const board of addon.data.boards.values()) {
+        board.onSceneChanged();
+      }
+    },
+  );
+  addon.data.bridge.registerNotifier();
 
-  KeyExampleFactory.registerShortcuts();
-
-  await UIExampleFactory.registerExtraColumn();
-
-  await UIExampleFactory.registerExtraColumnWithCustomCell();
-
-  UIExampleFactory.registerItemPaneCustomInfoRow();
-
-  UIExampleFactory.registerItemPaneSection();
-
-  UIExampleFactory.registerReaderItemPaneSection();
+  registerShortcuts();
 
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
@@ -50,50 +50,39 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
     `${addon.data.config.addonRef}-mainWindow.ftl`,
   );
 
-  const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
+  registerCommands(win);
+
+  new ztoolkit.ProgressWindow(addon.data.config.addonName, {
     closeOnClick: true,
-    closeTime: -1,
+    closeTime: 3000,
   })
     .createLine({
-      text: getString("startup-begin"),
-      type: "default",
-      progress: 0,
+      text: getString("startup-finish"),
+      type: "success",
+      progress: 100,
     })
     .show();
-
-  await Zotero.Promise.delay(1000);
-  popupWin.changeLine({
-    progress: 30,
-    text: `[30%] ${getString("startup-begin")}`,
-  });
-
-  UIExampleFactory.registerStyleSheet(win);
-
-  UIExampleFactory.registerRightClickMenuItem();
-
-  UIExampleFactory.registerRightClickMenuPopup();
-
-  UIExampleFactory.registerWindowMenuWithSeparator();
-
-  await Zotero.Promise.delay(1000);
-
-  popupWin.changeLine({
-    progress: 100,
-    text: `[100%] ${getString("startup-finish")}`,
-  });
-  popupWin.startCloseTimer(5000);
-
-  addon.hooks.onDialogEvents("dialogExample");
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
+  const board = addon.data.boards.get(win);
+  if (board) {
+    board.destroy();
+    addon.data.boards.delete(win);
+  }
+  unregisterCommands();
   ztoolkit.unregisterAll();
-  addon.data.dialog?.window?.close();
 }
 
-function onShutdown(): void {
+async function onShutdown(): Promise<void> {
+  for (const board of addon.data.boards.values()) {
+    board.destroy();
+  }
+  addon.data.boards.clear();
+  unregisterCommands();
   ztoolkit.unregisterAll();
-  addon.data.dialog?.window?.close();
+  addon.data.bridge?.unregisterNotifier();
+  await addon.data.layout?.flush();
   // Remove addon object
   addon.data.alive = false;
   // @ts-expect-error - Plugin instance is not typed
@@ -101,8 +90,8 @@ function onShutdown(): void {
 }
 
 /**
- * This function is just an example of dispatcher for Notify events.
- * Any operations should be placed in a function to keep this funcion clear.
+ * Dispatcher for Zotero Notify events. Forwarded to the data bridge, which
+ * keeps the spatial scene in sync with the library.
  */
 async function onNotify(
   event: string,
@@ -110,24 +99,14 @@ async function onNotify(
   ids: Array<string | number>,
   extraData: { [key: string]: any },
 ) {
-  // You can add your code to the corresponding notify type
-  ztoolkit.log("notify", event, type, ids, extraData);
-  if (
-    event == "select" &&
-    type == "tab" &&
-    extraData[ids[0]].type == "reader"
-  ) {
-    BasicExampleFactory.exampleNotifierCallback();
-  } else {
+  if (!addon?.data.alive) {
     return;
   }
+  await addon.data.bridge?.handleNotify(event, type, ids, extraData);
 }
 
 /**
- * This function is just an example of dispatcher for Preference UI events.
- * Any operations should be placed in a function to keep this funcion clear.
- * @param type event type
- * @param data event data
+ * Dispatcher for Preference UI events.
  */
 async function onPrefsEvent(type: string, data: { [key: string]: any }) {
   switch (type) {
@@ -141,43 +120,37 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
 
 function onShortcuts(type: string) {
   switch (type) {
-    case "larger":
-      KeyExampleFactory.exampleShortcutLargerCallback();
-      break;
-    case "smaller":
-      KeyExampleFactory.exampleShortcutSmallerCallback();
+    case "open-board":
+      void addon.api.openBoard?.();
       break;
     default:
       break;
   }
 }
 
-function onDialogEvents(type: string) {
-  switch (type) {
-    case "dialogExample":
-      HelperExampleFactory.dialogExample();
-      break;
-    case "clipboardExample":
-      HelperExampleFactory.clipboardExample();
-      break;
-    case "filePickerExample":
-      HelperExampleFactory.filePickerExample();
-      break;
-    case "progressWindowExample":
-      HelperExampleFactory.progressWindowExample();
-      break;
-    case "vtableExample":
-      HelperExampleFactory.vtableExample();
-      break;
-    default:
-      break;
-  }
+function registerPrefsPane() {
+  Zotero.PreferencePanes.register({
+    pluginID: addon.data.config.addonID,
+    src: rootURI + "content/preferences.xhtml",
+    label: getString("prefs-title"),
+    image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
+  });
 }
 
-// Add your hooks here. For element click, etc.
-// Keep in mind hooks only do dispatch. Don't add code that does real jobs in hooks.
-// Otherwise the code would be hard to read and maintain.
+function registerShortcuts() {
+  ztoolkit.Keyboard.register((ev, keyOptions) => {
+    if (keyOptions.type !== "keydown") {
+      return;
+    }
+    // Ctrl/Cmd+Shift+W opens or focuses the spatial board
+    if (keyOptions.keyboard?.equals("accel,shift,w")) {
+      ev.preventDefault();
+      addon.hooks.onShortcuts("open-board");
+    }
+  });
+}
 
+// Hooks only do dispatch. Don't add code that does real jobs in hooks.
 export default {
   onStartup,
   onShutdown,
@@ -186,5 +159,4 @@ export default {
   onNotify,
   onPrefsEvent,
   onShortcuts,
-  onDialogEvents,
 };

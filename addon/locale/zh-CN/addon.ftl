@@ -1,7 +1,9 @@
-startup-begin = 插件加载中
-startup-finish = 插件已就绪
-prefs-title = 插件模板
-prefs-table-title = 标题
-prefs-table-detail = 详情
-tabpanel-lib-tab-label = 库标签
-tabpanel-reader-tab-label = 阅读器标签
+startup-begin = 空间工作区正在加载
+startup-finish = 空间工作区已就绪
+prefs-title = 空间工作区
+board-tab-title = 空间工作区
+board-status-empty = 面板上还没有条目。在文献库中右键点击条目，选择“添加到空间工作区”。
+board-status-count = 面板上有 { $count } 个条目
+board-removed = 已从面板移除 { $count } 个条目（它们仍保留在 Zotero 中）
+board-added = 已添加 { $count } 个条目到面板
+board-nothing-selected = 未选择任何文献库条目

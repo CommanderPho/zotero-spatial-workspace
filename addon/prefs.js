@@ -1,2 +1,3 @@
-pref("enable", true);
-pref("input", "This is input");
+pref("autosaveDelayMs", 800);
+pref("showNotes", true);
+pref("labelDetail", "auto");

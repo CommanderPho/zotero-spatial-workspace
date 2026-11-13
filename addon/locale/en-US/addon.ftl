@@ -1,7 +1,9 @@
-startup-begin = Addon is loading
-startup-finish = Addon is ready
-prefs-title = Template
-prefs-table-title = Title
-prefs-table-detail = Detail
-tabpanel-lib-tab-label = Lib Tab
-tabpanel-reader-tab-label = Reader Tab
+startup-begin = Spatial Workspace is loading
+startup-finish = Spatial Workspace is ready
+prefs-title = Spatial Workspace
+board-tab-title = Spatial Workspace
+board-status-empty = No items on the board yet. Right-click items in your library and choose “Add to Spatial Workspace”.
+board-status-count = { $count } items on board
+board-removed = Removed { $count } items from the board (they remain in Zotero)
+board-added = Added { $count } items to the board
+board-nothing-selected = No library items selected

@@ -1,7 +1,10 @@
 import { config } from "../package.json";
-import { ColumnOptions, DialogHelper } from "zotero-plugin-toolkit";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
+import type { SceneStore } from "./modules/scene";
+import type { LayoutStore } from "./modules/persistence";
+import type { DataBridge } from "./modules/data";
+import type { Board } from "./modules/board";
 
 class Addon {
   public data: {
@@ -14,17 +17,18 @@ class Addon {
     locale?: {
       current: any;
     };
-    prefs?: {
-      window: Window;
-      columns: Array<ColumnOptions>;
-      rows: Array<{ [dataKey: string]: string }>;
-    };
-    dialog?: DialogHelper;
+    scene?: SceneStore;
+    layout?: LayoutStore;
+    bridge?: DataBridge;
+    boards: Map<Window, Board>;
   };
   // Lifecycle hooks
   public hooks: typeof hooks;
   // APIs
-  public api: object;
+  public api: {
+    openBoard?: (libraryID?: number) => Promise<void>;
+    addSelectedToBoard?: () => Promise<void>;
+  };
 
   constructor() {
     this.data = {
@@ -33,6 +37,7 @@ class Addon {
       env: __env__,
       initialized: false,
       ztoolkit: createZToolkit(),
+      boards: new Map(),
     };
     this.hooks = hooks;
     this.api = {};
