@@ -52,7 +52,7 @@ export function registerCommands(win: _ZoteroTypes.MainWindow): void {
     const targetLibrary =
       libraryID ??
       (addon.data.scene?.libraryID ||
-        ZoteroPane.getSelectedLibraryID() ||
+        Zotero.getActiveZoteroPane()?.getSelectedLibraryID() ||
         Zotero.Libraries.userLibraryID);
     if (
       !addon.data.scene ||
@@ -70,7 +70,7 @@ export function registerCommands(win: _ZoteroTypes.MainWindow): void {
   };
 
   addon.api.addSelectedToBoard = async () => {
-    const items = ZoteroPane.getSelectedItems();
+    const items = Zotero.getActiveZoteroPane()?.getSelectedItems() ?? [];
     if (!items.length) {
       new ztoolkit.ProgressWindow(config.addonName)
         .createLine({

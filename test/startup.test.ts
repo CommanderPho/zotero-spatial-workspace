@@ -95,4 +95,17 @@ describe("startup", function () {
     assert.equal(restored!.x, 1234, "saved x position should be restored");
     assert.equal(restored!.y, 5678, "saved y position should be restored");
   });
+
+  it("should open the board without an explicit libraryID (sandbox-safe pane access)", async function () {
+    this.timeout(30000);
+    const instance = Zotero[config.addonInstance];
+    // This is the path that previously threw "ZoteroPane is not defined":
+    // with no libraryID it must resolve the library via
+    // Zotero.getActiveZoteroPane(), not a bare main-window global.
+    await instance.api.openBoard();
+    const win = Zotero.getMainWindow();
+    const board = instance.data.boards.get(win);
+    assert.isNotEmpty(board, "board should be registered");
+    assert.isTrue(board!.isOpen, "board tab should be open");
+  });
 });

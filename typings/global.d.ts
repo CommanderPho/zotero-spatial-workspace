@@ -17,6 +17,7 @@ declare const addon: import("../src/addon").default;
 
 declare const __env__: "production" | "development";
 
-// Window globals provided by the Zotero main window at runtime.
-declare const ZoteroPane: _ZoteroTypes.ZoteroPane;
-declare const Zotero_Tabs: _ZoteroTypes.Zotero_Tabs;
+// NOTE: Do NOT declare main-window globals (ZoteroPane, Zotero_Tabs, etc.)
+// here. The plugin bundle runs in the bootstrap sandbox where they do not
+// exist. Access them via Zotero.getActiveZoteroPane() or
+// Zotero.getMainWindow().ZoteroPane / .Zotero_Tabs instead.

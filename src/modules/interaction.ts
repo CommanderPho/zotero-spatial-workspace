@@ -334,16 +334,24 @@ export class Interaction {
 
 /** Open a scene node in Zotero: reader for attachments, note editor, etc. */
 export async function openNode(node: SceneNode): Promise<void> {
+  const pane = Zotero.getActiveZoteroPane();
+  if (!pane) {
+    return;
+  }
+  if (node.kind === "collection") {
+    // Collections live in the collection tree, not the items list.
+    const collectionsView = pane.collectionsView;
+    if (collectionsView) {
+      collectionsView.selectByID(`C${node.zoteroID}`);
+    }
+    return;
+  }
   const item = Zotero.Items.get(node.zoteroID);
   if (!item) {
     return;
   }
-  if (node.kind === "collection") {
-    ZoteroPane.selectItem(node.zoteroID, true);
-    return;
-  }
   if (item.isNote()) {
-    await ZoteroPane.openNote(item.id);
+    await pane.openNote(item.id);
     return;
   }
   if (item.isAttachment()) {
@@ -355,5 +363,5 @@ export async function openNode(node: SceneNode): Promise<void> {
     await Zotero.FileHandlers.open(attachment);
     return;
   }
-  ZoteroPane.selectItem(item.id, true);
+  pane.selectItem(item.id, true);
 }
