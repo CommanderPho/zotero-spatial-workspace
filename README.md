@@ -23,9 +23,9 @@ view can be added in a later release.
 - **Folders, papers, notes** — collections render as labeled regions, regular
   items as cards (title, creator, year), notes as yellow sticky cards with a
   link line to their parent.
-- **Direct manipulation** — pan by dragging the background, zoom at the cursor
-  with the wheel, drag cards (multi-select with Shift-click or marquee),
-  double-click a card to open the item in Zotero.
+- **Direct manipulation** — pan with middle-drag, zoom at the cursor with the
+  wheel, marquee-select by dragging the background (Shift to add), drag cards
+  (Shift-click toggles), double-click a card to open the item in Zotero.
 - **Add from the library** — drag items onto the board (best with the pop-out
   window beside the library), or select items and right-click → "Add to
   Spatial Workspace". Dropped items land at the drop point; context-menu adds
@@ -52,17 +52,18 @@ view can be added in a later release.
 
 ## Controls
 
-| Input                 | Action                                             |
-| --------------------- | -------------------------------------------------- |
-| Drag background       | Pan                                                |
-| Mouse wheel           | Zoom at cursor                                     |
-| Drag card             | Move card(s)                                       |
-| Shift-click / marquee | Multi-select                                       |
-| Double-click card     | Open item in Zotero                                |
-| Delete                | Remove selection from board (items stay in Zotero) |
-| Esc                   | Clear filter (if active) and selection             |
-| Ctrl/Cmd+F            | Focus the filter box                               |
-| Ctrl/Cmd+Shift+W      | Open/focus the board                               |
+| Input             | Action                                             |
+| ----------------- | -------------------------------------------------- |
+| Middle-drag       | Pan                                                |
+| Drag background   | Marquee select (Shift adds)                        |
+| Mouse wheel       | Zoom at cursor                                     |
+| Drag card         | Move card(s)                                       |
+| Shift-click       | Toggle multi-select                                |
+| Double-click card | Open item in Zotero                                |
+| Delete            | Remove selection from board (items stay in Zotero) |
+| Esc               | Clear filter (if active) and selection             |
+| Ctrl/Cmd+F        | Focus the filter box                               |
+| Ctrl/Cmd+Shift+W  | Open/focus the board                               |
 
 Toolbar: auto-arrange, zoom-to-fit, toggle notes, pop out / dock, temporary
 filter box.

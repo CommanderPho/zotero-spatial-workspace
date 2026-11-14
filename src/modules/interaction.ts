@@ -1,8 +1,8 @@
 /**
  * Pointer / wheel / keyboard input for the board canvas.
  *
- * - Background drag pans; card drag moves the selection (shift-click and
- *   marquee for multi-select).
+ * - Middle-drag pans; background left-drag draws a selection marquee
+ *   (Shift adds); card drag moves the selection (Shift-click toggles).
  * - Wheel zooms at the cursor.
  * - Double-click opens the item in Zotero (reader for PDFs).
  * - Delete removes nodes from the board only; Zotero data is untouched.
@@ -80,7 +80,11 @@ export class Interaction {
     this.on(this.canvas, "pointerup", (ev: PointerEvent) =>
       this.onPointerUp(ev),
     );
-    this.on(this.canvas, "pointercancel", () => this.endDrag());
+    this.on(this.canvas, "pointercancel", () => {
+      this.renderer.marquee = null;
+      this.endDrag();
+      this.renderer.requestDraw();
+    });
     this.on(
       this.canvas,
       "wheel",
@@ -129,17 +133,14 @@ export class Interaction {
     const node = this.scene.hitTest(world.x, world.y);
 
     if (ev.button === 1) {
-      // Middle-drag always pans.
+      // Middle-drag is the only pan gesture.
       this.mode = "pan";
       return;
     }
     if (!node) {
-      // Background: shift-drag draws a selection marquee, plain drag pans.
-      // A plain click (no movement) clears selection on release.
-      this.mode = ev.shiftKey ? "marquee" : "pan";
-      if (ev.shiftKey) {
-        this.moved = true;
-      }
+      // Background: drag draws a selection marquee (Shift adds to the
+      // selection). A plain click (no movement) clears selection on release.
+      this.mode = "marquee";
       return;
     }
 
@@ -238,9 +239,6 @@ export class Interaction {
     const moved = this.moved;
     this.endDrag();
 
-    if (wasMode === "pan" && !moved && ev.button === 0) {
-      this.scene.clearSelection();
-    }
     if (wasMode === "move" && moved) {
       this.scene.endBatch();
     }
@@ -253,6 +251,8 @@ export class Interaction {
           .filter((n) => n.kind !== "collection")
           .map((n) => n.id);
         this.scene.select(hits, ev.shiftKey);
+      } else if (!moved && ev.button === 0 && !ev.shiftKey) {
+        this.scene.clearSelection();
       }
       this.renderer.requestDraw();
     }
