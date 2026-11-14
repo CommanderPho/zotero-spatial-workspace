@@ -4,7 +4,6 @@ import { createZToolkit } from "./utils/ztoolkit";
 import { SceneStore } from "./modules/scene";
 import { LayoutStore } from "./modules/persistence";
 import { DataBridge } from "./modules/data";
-import { Board } from "./modules/board";
 import { registerCommands, unregisterCommands } from "./modules/commands";
 
 async function onStartup() {
@@ -65,17 +64,20 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
-  const board = addon.data.boards.get(win);
-  if (board) {
-    board.destroy();
-    addon.data.boards.delete(win);
+  // Close any board hosted in this main window, and any pop-out that was
+  // opened from it (pop-outs are keyed by their chrome window).
+  for (const [key, board] of [...addon.data.boards.entries()]) {
+    if (key === win || board.mainWin === win) {
+      board.destroy();
+      addon.data.boards.delete(key);
+    }
   }
   unregisterCommands();
   ztoolkit.unregisterAll();
 }
 
 async function onShutdown(): Promise<void> {
-  for (const board of addon.data.boards.values()) {
+  for (const board of [...addon.data.boards.values()]) {
     board.destroy();
   }
   addon.data.boards.clear();

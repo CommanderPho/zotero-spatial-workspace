@@ -280,7 +280,7 @@ export class DataBridge {
             }
           } else if (item.isRegularItem()) {
             const node = this.itemToNode(item);
-            const spot = this.freeSpotNearCamera(0, occupied);
+            const spot = this.freeSpotNear(0, occupied);
             node.x = spot.x;
             node.y = spot.y;
             added.push(node);
@@ -389,7 +389,7 @@ export class DataBridge {
           }
           const w = CARD_W + REGION_PAD * 2;
           const h = CARD_H + REGION_PAD * 2 + REGION_HEADER;
-          const spot = this.freeSpotNearCamera(0, occupied, w, h);
+          const spot = this.freeSpotNear(0, occupied, undefined, w, h);
           added.push({
             id: collectionNodeID(id),
             kind: "collection",
@@ -447,8 +447,15 @@ export class DataBridge {
     }
   }
 
-  /** Add existing library items to the board near the current view. */
-  addItems(items: Zotero.Item[]): number {
+  /**
+   * Add existing library items to the board.
+   * When `at` is provided (e.g. a drop point in world coords), cards are
+   * placed in a small grid anchored there; otherwise near the camera.
+   */
+  addItems(
+    items: Zotero.Item[],
+    at?: { x: number; y: number },
+  ): number {
     const added: SceneNode[] = [];
     const occupied: Rect[] = [];
     let index = 0;
@@ -475,7 +482,7 @@ export class DataBridge {
         continue;
       }
       const node = this.itemToNode(item);
-      const spot = this.freeSpotNearCamera(index, occupied);
+      const spot = this.freeSpotNear(index, occupied, at);
       node.x = spot.x;
       node.y = spot.y;
       added.push(node);
@@ -509,19 +516,21 @@ export class DataBridge {
     return added.length;
   }
 
-  /** Preferred spot near the view center, nudged until collision-free. */
-  private freeSpotNearCamera(
+  /** Preferred spot near `origin` (or the camera), nudged until free. */
+  private freeSpotNear(
     index = 0,
     occupied: Rect[] = [],
+    origin?: { x: number; y: number },
     w = CARD_W,
     h = CARD_H,
   ): { x: number; y: number } {
     const cam = this.scene.camera;
+    const base = origin ?? { x: cam.x + 60, y: cam.y + 60 };
     const gx = index % 4;
     const gy = Math.floor(index / 4);
     const preferred = {
-      x: cam.x + 60 + gx * (CARD_W + GRID_GAP),
-      y: cam.y + 60 + gy * (CARD_H + GRID_GAP),
+      x: base.x + gx * (CARD_W + GRID_GAP),
+      y: base.y + gy * (CARD_H + GRID_GAP),
     };
     return findFreeSpot(this.scene, w, h, preferred, occupied);
   }

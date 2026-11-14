@@ -15,16 +15,21 @@ view can be added in a later release.
 
 ## Features
 
-- **Spatial board tab** — open from Tools → Spatial Workspace, the item
+- **Spatial board tab** — open from Tools → Open Spatial Workspace, the item
   context menu, or `Ctrl+Shift+W` (`Cmd+Shift+W` on macOS).
+- **Pop-out window** — use the toolbar **Pop out** button (or Tools → Open
+  Spatial Workspace in Window) to place the board beside the library so you
+  can drag papers onto it. **Dock** returns it to a tab.
 - **Folders, papers, notes** — collections render as labeled regions, regular
   items as cards (title, creator, year), notes as yellow sticky cards with a
   link line to their parent.
 - **Direct manipulation** — pan by dragging the background, zoom at the cursor
   with the wheel, drag cards (multi-select with Shift-click or marquee),
   double-click a card to open the item in Zotero.
-- **Add from the library** — select items, right-click → "Add to Spatial
-  Workspace". New items land near the current view.
+- **Add from the library** — drag items onto the board (best with the pop-out
+  window beside the library), or select items and right-click → "Add to
+  Spatial Workspace". Dropped items land at the drop point; context-menu adds
+  land near the current view.
 - **Temporary filters** — a toolbar search box hides non-matching cards
   without moving anything; clearing it restores the board exactly.
   Query terms: bare words (title/creator/type), `title:`, `author:`,
@@ -59,7 +64,8 @@ view can be added in a later release.
 | Ctrl/Cmd+F            | Focus the filter box                               |
 | Ctrl/Cmd+Shift+W      | Open/focus the board                               |
 
-Toolbar: auto-arrange, zoom-to-fit, toggle notes, temporary filter box.
+Toolbar: auto-arrange, zoom-to-fit, toggle notes, pop out / dock, temporary
+filter box.
 
 Preferences (Settings → Spatial Workspace): autosave delay, show notes,
 label detail.
@@ -89,7 +95,7 @@ Architecture (all under `src/modules/`):
 - `data.ts` — Zotero → scene bridge with notifier-driven live sync.
 - `render2d.ts` — Canvas2D renderer (culling, LOD, cached text metrics).
 - `interaction.ts` — pan/zoom/drag/select/open input handling.
-- `commands.ts` — menus, shortcut, board tab lifecycle, toolbar actions.
+- `commands.ts` — menus, shortcut, board tab/window lifecycle, toolbar actions.
 
 ## License
 

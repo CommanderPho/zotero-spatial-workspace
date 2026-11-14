@@ -27,6 +27,7 @@ class Addon {
   // APIs
   public api: {
     openBoard?: (libraryID?: number) => Promise<void>;
+    openBoardWindow?: (libraryID?: number) => Promise<void>;
     addSelectedToBoard?: () => Promise<void>;
   };
 

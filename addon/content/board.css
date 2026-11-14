@@ -6,8 +6,19 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  height: 100%;
   background: var(--material-background, #fff);
   color: var(--fill-primary, #1a1a1a);
+}
+
+.spatialworkspace-board-root.spatialworkspace-drop-target {
+  outline: 2px solid var(--color-accent, #2f6fed);
+  outline-offset: -2px;
+}
+
+.spatialworkspace-board-root.spatialworkspace-drop-target
+  .spatialworkspace-canvas-wrap {
+  background: var(--color-accent10, rgba(47, 111, 237, 0.08));
 }
 
 .spatialworkspace-toolbar {

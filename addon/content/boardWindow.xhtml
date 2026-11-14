@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<!-- prettier-ignore -->
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<!-- prettier-ignore -->
+<?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
+<!-- prettier-ignore -->
+<?xml-stylesheet href="chrome://zotero-platform/content/zotero.css" type="text/css"?>
+<!-- prettier-ignore -->
+<!DOCTYPE html>
+<html
+  id="spatialworkspace-boardWindow"
+  lang="en"
+  xmlns="http://www.w3.org/1999/xhtml"
+  xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  xmlns:html="http://www.w3.org/1999/xhtml"
+  windowtype="__addonRef__-boardWindow"
+  sizemode="normal"
+  scrolling="false"
+  persist="screenX screenY width height sizemode"
+>
+  <head>
+    <title data-l10n-id="title"></title>
+    <meta charset="utf-8" />
+    <script src="chrome://zotero/content/include.js"></script>
+    <script src="chrome://zotero/content/customElements.js"></script>
+    <script src="chrome://__addonRef__/content/scripts/boardWindow.js"></script>
+    <xul:linkset>
+      <link rel="localization" href="browser/menubar.ftl" />
+      <link rel="localization" href="browser/browserSets.ftl" />
+      <link rel="localization" href="toolkit/global/textActions.ftl" />
+      <link rel="localization" href="zotero.ftl" />
+      <link rel="localization" href="__addonRef__-boardWindow.ftl" />
+    </xul:linkset>
+    <xul:commandset id="mainCommandSet">
+      <xul:command id="cmd_close" oncommand="window.close();" />
+    </xul:commandset>
+    <xul:keyset id="mainKeyset">
+      <xul:key
+        id="key_close"
+        data-l10n-id="close-shortcut"
+        command="cmd_close"
+        modifiers="accel"
+        reserved="true"
+      />
+    </xul:keyset>
+    <style>
+      html,
+      body {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        min-width: 640px;
+        min-height: 400px;
+      }
+      #board-container {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+    </style>
+  </head>
+  <body class="zotero-window">
+    <xul:popupset>
+      <xul:tooltip id="html-tooltip" page="true" />
+    </xul:popupset>
+    <div id="board-container"></div>
+  </body>
+</html>

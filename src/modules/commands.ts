@@ -5,6 +5,7 @@
 
 import { config } from "../../package.json";
 import { getLocaleID, getString } from "../utils/locale";
+import { isWindowAlive } from "../utils/window";
 import { Board } from "./board";
 
 /**
@@ -25,8 +26,66 @@ function getSelectedLibraryID(
 
 const MENU_IDS = [
   `${config.addonRef}-tools-open`,
+  `${config.addonRef}-tools-open-window`,
   `${config.addonRef}-item-add`,
 ];
+
+function findOpenBoard(): Board | undefined {
+  for (const board of addon.data.boards.values()) {
+    if (board.isOpen) {
+      return board;
+    }
+  }
+  return undefined;
+}
+
+/** Drop dead window keys left after a host closed unexpectedly. */
+function pruneDeadBoards(): void {
+  for (const [key, board] of [...addon.data.boards.entries()]) {
+    if (!board.isOpen || !isWindowAlive(key)) {
+      if (board.isOpen) {
+        board.destroy({ skipCloseHost: true });
+      }
+      addon.data.boards.delete(key);
+    }
+  }
+}
+
+async function ensureLibraryLoaded(libraryID: number): Promise<void> {
+  if (
+    !addon.data.scene ||
+    addon.data.scene.libraryID !== libraryID ||
+    addon.data.scene.nodes.size === 0
+  ) {
+    await addon.data.bridge?.loadLibrary(libraryID);
+  }
+}
+
+function resolveTargetLibrary(libraryID?: number): number {
+  const pane = Zotero.getActiveZoteroPane();
+  return (
+    libraryID ??
+    (addon.data.scene?.libraryID ||
+      (pane && getSelectedLibraryID(pane)) ||
+      Zotero.Libraries.userLibraryID)
+  );
+}
+
+function getOrCreateBoard(): Board {
+  pruneDeadBoards();
+  const existing = findOpenBoard();
+  if (existing) {
+    return existing;
+  }
+  const mainWin = Zotero.getMainWindow() as _ZoteroTypes.MainWindow;
+  const stale = addon.data.boards.get(mainWin);
+  if (stale && !stale.isOpen) {
+    addon.data.boards.delete(mainWin);
+  }
+  const board = new Board(mainWin, addon.data.scene!);
+  addon.data.boards.set(mainWin, board);
+  return board;
+}
 
 export function registerCommands(win: _ZoteroTypes.MainWindow): void {
   const menuIcon = `chrome://${config.addonRef}/content/icons/favicon@0.5x.png`;
@@ -50,6 +109,22 @@ export function registerCommands(win: _ZoteroTypes.MainWindow): void {
   Zotero.MenuManager.registerMenu({
     menuID: MENU_IDS[1],
     pluginID: config.addonID,
+    target: "main/menubar/tools",
+    menus: [
+      {
+        menuType: "menuitem",
+        l10nID: getLocaleID("menuitem-open-board-window"),
+        icon: menuIcon,
+        onCommand: () => {
+          void addon.api.openBoardWindow?.();
+        },
+      },
+    ],
+  });
+
+  Zotero.MenuManager.registerMenu({
+    menuID: MENU_IDS[2],
+    pluginID: config.addonID,
     target: "main/library/item",
     menus: [
       {
@@ -64,26 +139,29 @@ export function registerCommands(win: _ZoteroTypes.MainWindow): void {
   });
 
   addon.api.openBoard = async (libraryID?: number) => {
-    const win = Zotero.getMainWindow();
-    const pane = Zotero.getActiveZoteroPane();
-    const targetLibrary =
-      libraryID ??
-      (addon.data.scene?.libraryID ||
-        (pane && getSelectedLibraryID(pane)) ||
-        Zotero.Libraries.userLibraryID);
-    if (
-      !addon.data.scene ||
-      addon.data.scene.libraryID !== targetLibrary ||
-      addon.data.scene.nodes.size === 0
-    ) {
-      await addon.data.bridge?.loadLibrary(targetLibrary);
+    const targetLibrary = resolveTargetLibrary(libraryID);
+    await ensureLibraryLoaded(targetLibrary);
+    const board = getOrCreateBoard();
+    if (board.isOpen) {
+      board.focus();
+      return;
     }
-    let board = addon.data.boards.get(win);
-    if (!board || !board.isOpen) {
-      board = new Board(win, addon.data.scene!);
-      addon.data.boards.set(win, board);
+    await board.openAsTab();
+  };
+
+  addon.api.openBoardWindow = async (libraryID?: number) => {
+    const targetLibrary = resolveTargetLibrary(libraryID);
+    await ensureLibraryLoaded(targetLibrary);
+    const board = getOrCreateBoard();
+    if (board.isOpen && board.hostMode === "window") {
+      board.focus();
+      return;
     }
-    await board.open();
+    if (board.isOpen && board.hostMode === "tab") {
+      await board.popOut();
+      return;
+    }
+    await board.openAsWindow();
   };
 
   addon.api.addSelectedToBoard = async () => {
@@ -98,15 +176,14 @@ export function registerCommands(win: _ZoteroTypes.MainWindow): void {
       return;
     }
     const libraryID = items[0].libraryID;
-    if (
-      !addon.data.scene ||
-      addon.data.scene.libraryID !== libraryID ||
-      addon.data.scene.nodes.size === 0
-    ) {
-      await addon.data.bridge?.loadLibrary(libraryID);
-    }
+    await ensureLibraryLoaded(libraryID);
     const count = addon.data.bridge?.addItems(items) ?? 0;
-    await addon.api.openBoard?.(libraryID);
+    const board = getOrCreateBoard();
+    if (!board.isOpen) {
+      await board.openAsTab();
+    } else {
+      board.focus();
+    }
     if (count > 0) {
       new ztoolkit.ProgressWindow(config.addonName)
         .createLine({
@@ -122,10 +199,11 @@ export function unregisterCommands(): void {
   for (const menuID of MENU_IDS) {
     try {
       Zotero.MenuManager.unregisterMenu(menuID);
-    } catch (e) {
+    } catch {
       // Menu may not be registered in this window.
     }
   }
   addon.api.openBoard = undefined;
+  addon.api.openBoardWindow = undefined;
   addon.api.addSelectedToBoard = undefined;
 }

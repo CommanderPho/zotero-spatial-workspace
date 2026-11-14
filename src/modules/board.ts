@@ -1,13 +1,15 @@
 /**
- * Board tab lifecycle: creates the Zotero tab, mounts the canvas + toolbar,
- * wires the renderer / interaction / resize observer, and tears everything
- * down on close. One board per main window; the scene itself is shared.
+ * Board host lifecycle: mounts the canvas + toolbar into either a Zotero tab
+ * or a chrome pop-out window, wires the renderer / interaction / resize
+ * observer / library drops, and tears everything down on close.
+ * One board UI per host window; the scene itself is shared.
  */
 
 import { config } from "../../package.json";
 import type { FluentMessageId } from "../../typings/i10n";
-import { getString, getLocaleID } from "../utils/locale";
+import { getString } from "../utils/locale";
 import { getPref, setPref } from "../utils/prefs";
+import { isWindowAlive } from "../utils/window";
 import type { SceneStore } from "./scene";
 import { computeLayout } from "./layout";
 import { parseFilter } from "./filter";
@@ -15,6 +17,8 @@ import { Renderer2D } from "./render2d";
 import { Interaction } from "./interaction";
 
 const TAB_TYPE = `${config.addonRef}-board`;
+
+type BoardHost = "tab" | "window";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -38,6 +42,10 @@ const TOOLBAR_ICONS: Record<string, string[]> = {
   ],
   // Cross: clear filter
   clear: ["M4 4l8 8", "M12 4l-8 8"],
+  // Arrow out of a frame: pop out to a window
+  popout: ["M6.5 2.5H2.5v11h11V9.5", "M9.5 2.5H13.5V6.5", "M8 8l5.5-5.5"],
+  // Arrow into a frame: dock back to a tab
+  dock: ["M2.5 4.5h11v9H2.5z", "M5 2.5h6", "M8 7.5v4", "M6 10l2 2 2-2"],
 };
 
 function createToolbarIcon(doc: Document, name: string): Element {
@@ -60,10 +68,66 @@ function createToolbarIcon(doc: Document, name: string): Element {
   return svg;
 }
 
+/** Resolve Zotero library items from a drag dataTransfer. */
+export function itemsFromDataTransfer(
+  dataTransfer: DataTransfer | null,
+): Zotero.Item[] {
+  if (!dataTransfer) {
+    return [];
+  }
+  let ids: number[] = [];
+  const dragDrop = (
+    Zotero as unknown as {
+      DragDrop?: {
+        getDataFromDataTransfer?: (dt: DataTransfer) => {
+          dataType?: string;
+          data?: unknown[];
+        } | null;
+      };
+    }
+  ).DragDrop;
+  const parsed = dragDrop?.getDataFromDataTransfer?.(dataTransfer);
+  if (
+    parsed?.data &&
+    (parsed.dataType === "zotero/item" || parsed.dataType === "item")
+  ) {
+    ids = parsed.data.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+  }
+  if (!ids.length) {
+    const raw = dataTransfer.getData("zotero/item");
+    if (raw) {
+      ids = raw
+        .split(",")
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((id) => Number.isFinite(id));
+    }
+  }
+  if (!ids.length) {
+    return [];
+  }
+  const items = Zotero.Items.get(ids);
+  return (Array.isArray(items) ? items : [items]).filter(
+    (item): item is Zotero.Item => !!item,
+  );
+}
+
+function dataTransferHasItems(dataTransfer: DataTransfer | null): boolean {
+  if (!dataTransfer) {
+    return false;
+  }
+  const types = Array.from(dataTransfer.types || []);
+  return types.includes("zotero/item");
+}
+
 export class Board {
-  readonly win: _ZoteroTypes.MainWindow;
+  /** Main Zotero window (used for tabs and openDialog). */
+  readonly mainWin: _ZoteroTypes.MainWindow;
   private scene: SceneStore;
+  private host: BoardHost | null = null;
+  /** Window that owns the board DOM (main window or chrome pop-out). */
+  private hostWin?: Window;
   private tabID?: string;
+  private chromeWin?: Window;
   private root?: HTMLElement;
   private canvas?: HTMLCanvasElement;
   private statusEl?: HTMLElement;
@@ -74,47 +138,205 @@ export class Board {
   private interaction?: Interaction;
   private resizeObserver?: ResizeObserver;
   private unsubscribeScene?: () => void;
+  private dropCleanups: Array<() => void> = [];
   private destroyed = false;
+  private closingChrome = false;
 
-  constructor(win: _ZoteroTypes.MainWindow, scene: SceneStore) {
-    this.win = win;
+  constructor(mainWin: _ZoteroTypes.MainWindow, scene: SceneStore) {
+    this.mainWin = mainWin;
     this.scene = scene;
   }
 
-  get isOpen(): boolean {
-    return !!this.tabID && !this.destroyed;
+  /** @deprecated Use mainWin; kept for callers that still read `.win`. */
+  get win(): _ZoteroTypes.MainWindow {
+    return this.mainWin;
   }
 
-  /** Open the tab (or focus it when already open). */
-  async open(): Promise<void> {
-    if (this.isOpen) {
-      this.win.Zotero_Tabs.select(this.tabID!);
+  get isOpen(): boolean {
+    return this.host !== null && !this.destroyed;
+  }
+
+  get hostMode(): BoardHost | null {
+    return this.host;
+  }
+
+  /** Key used in addon.data.boards for this instance. */
+  get mapKey(): Window {
+    if (this.host === "window" && this.chromeWin) {
+      return this.chromeWin;
+    }
+    return this.mainWin;
+  }
+
+  /** Focus the existing host (tab or window). */
+  focus(): void {
+    if (!this.isOpen) {
       return;
     }
-    const { id, container } = this.win.Zotero_Tabs.add({
+    if (this.host === "tab" && this.tabID) {
+      this.mainWin.Zotero_Tabs.select(this.tabID);
+      this.mainWin.focus();
+      return;
+    }
+    if (this.host === "window" && isWindowAlive(this.chromeWin)) {
+      this.chromeWin!.focus();
+    }
+  }
+
+  /** Open the tab (or focus it when already open as a tab). */
+  async openAsTab(): Promise<void> {
+    if (this.destroyed) {
+      return;
+    }
+    if (this.isOpen && this.host === "tab") {
+      this.focus();
+      return;
+    }
+    if (this.isOpen && this.host === "window") {
+      await this.dock();
+      return;
+    }
+    const { id, container } = this.mainWin.Zotero_Tabs.add({
       type: TAB_TYPE,
       title: getString("board-tab-title"),
       data: {
         icon: `chrome://${config.addonRef}/content/icons/favicon@0.5x.png`,
       },
       select: true,
-      onClose: () => this.destroy(),
+      onClose: () => {
+        if (!this.destroyed && this.host === "tab") {
+          this.destroy({ skipCloseHost: true });
+        }
+      },
     });
     this.tabID = id;
+    this.host = "tab";
+    this.hostWin = this.mainWin;
     this.mount(container as unknown as HTMLElement);
+    this.rekeyBoardMap(this.mainWin);
+  }
+
+  /** Open (or focus) the chrome pop-out window. */
+  async openAsWindow(): Promise<void> {
+    if (this.destroyed) {
+      return;
+    }
+    if (this.isOpen && this.host === "window") {
+      this.focus();
+      return;
+    }
+    if (this.isOpen && this.host === "tab") {
+      await this.popOut();
+      return;
+    }
+    await this.mountInChromeWindow();
+  }
+
+  /** Move from tab into a pop-out window. */
+  async popOut(): Promise<void> {
+    if (this.destroyed) {
+      return;
+    }
+    if (this.host === "window") {
+      this.focus();
+      return;
+    }
+    this.unmount({ closeTab: true });
+    await this.mountInChromeWindow();
+  }
+
+  /** Move from pop-out window back into a tab. */
+  async dock(): Promise<void> {
+    if (this.destroyed) {
+      return;
+    }
+    if (this.host === "tab") {
+      this.focus();
+      return;
+    }
+    this.unmount({ closeWindow: true });
+    await this.openAsTab();
+  }
+
+  /** @deprecated Prefer openAsTab(). */
+  async open(): Promise<void> {
+    await this.openAsTab();
+  }
+
+  private async mountInChromeWindow(): Promise<void> {
+    const windowArgs = {
+      _initPromise: Zotero.Promise.defer(),
+    };
+    const chromeWin = this.mainWin.openDialog(
+      `chrome://${config.addonRef}/content/boardWindow.xhtml`,
+      `${config.addonRef}-board`,
+      "chrome,centerscreen,resizable,status,dialog=no",
+      windowArgs,
+    );
+    if (!chromeWin) {
+      throw new Error("Failed to open Spatial Workspace window");
+    }
+    await windowArgs._initPromise.promise;
+
+    this.chromeWin = chromeWin;
+    this.host = "window";
+    this.hostWin = chromeWin;
+
+    chromeWin.addEventListener(
+      "unload",
+      () => {
+        if (this.closingChrome || this.destroyed) {
+          return;
+        }
+        if (this.host === "window") {
+          this.destroy({ skipCloseHost: true });
+        }
+      },
+      { once: true },
+    );
+
+    const container = chromeWin.document.querySelector(
+      "#board-container",
+    ) as HTMLElement | null;
+    if (!container) {
+      chromeWin.close();
+      throw new Error("Spatial Workspace window missing #board-container");
+    }
+    this.mount(container);
+    this.rekeyBoardMap(chromeWin);
+    chromeWin.focus();
+  }
+
+  private rekeyBoardMap(key: Window): void {
+    for (const [existingKey, board] of addon.data.boards) {
+      if (board === this && existingKey !== key) {
+        addon.data.boards.delete(existingKey);
+      }
+    }
+    addon.data.boards.set(key, this);
+  }
+
+  private view(): Window {
+    return this.hostWin || this.mainWin;
   }
 
   private mount(container: HTMLElement): void {
-    const doc = this.win.document;
+    const view = this.view();
+    const doc = container.ownerDocument;
+    if (!doc) {
+      throw new Error("Board container has no ownerDocument");
+    }
 
-    const link = ztoolkit.UI.createElement(doc, "link", {
-      properties: {
-        rel: "stylesheet",
-        type: "text/css",
-        href: `chrome://${config.addonRef}/content/board.css`,
-      },
-    });
-    doc.documentElement?.appendChild(link);
+    if (!doc.querySelector(`link[href*="${config.addonRef}/content/board.css"]`)) {
+      const link = ztoolkit.UI.createElement(doc, "link", {
+        properties: {
+          rel: "stylesheet",
+          type: "text/css",
+          href: `chrome://${config.addonRef}/content/board.css`,
+        },
+      });
+      doc.documentElement?.appendChild(link);
+    }
 
     const root = ztoolkit.UI.createElement(doc, "div", {
       classList: [`${config.addonRef}-board-root`],
@@ -146,13 +368,22 @@ export class Board {
     notesBtn.setAttribute("aria-pressed", "true");
     this.notesBtn = notesBtn;
 
+    const hostBtn =
+      this.host === "window"
+        ? this.toolbarButton(doc, "dock", "board-toolbar-dock", () => {
+            void this.dock();
+          })
+        : this.toolbarButton(doc, "popout", "board-toolbar-popout", () => {
+            void this.popOut();
+          });
+
     // Temporary visibility filter: hides non-matching cards without
     // touching positions or the saved layout.
     const filterInput = ztoolkit.UI.createElement(doc, "input", {
       classList: [`${config.addonRef}-filter-input`],
       attributes: {
         type: "search",
-        "data-l10n-id": getLocaleID("board-filter-placeholder"),
+        placeholder: getString("board-filter-placeholder"),
         title: getString("board-filter-tooltip"),
       },
       listeners: [
@@ -192,6 +423,7 @@ export class Board {
       arrangeBtn,
       fitBtn,
       notesBtn,
+      hostBtn,
       filterInput,
       filterClearBtn,
       status,
@@ -228,8 +460,13 @@ export class Board {
       },
     );
 
-    this.resizeObserver = new this.win.ResizeObserver(() => this.syncSize());
-    this.resizeObserver!.observe(wrap);
+    this.bindDropTarget(root);
+
+    const ResizeObs =
+      (view as unknown as { ResizeObserver?: typeof ResizeObserver })
+        .ResizeObserver || ResizeObserver;
+    this.resizeObserver = new ResizeObs(() => this.syncSize());
+    this.resizeObserver.observe(wrap);
     this.syncSize();
 
     this.unsubscribeScene = this.scene.onChange(() => {
@@ -241,6 +478,85 @@ export class Board {
     this.syncNotesButton();
     this.updateStatus();
     this.renderer.requestDraw();
+  }
+
+  private bindDropTarget(root: HTMLElement): void {
+    const onDragOver = (ev: DragEvent) => {
+      if (!dataTransferHasItems(ev.dataTransfer)) {
+        return;
+      }
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (ev.dataTransfer) {
+        ev.dataTransfer.dropEffect = "copy";
+      }
+      root.classList.add(`${config.addonRef}-drop-target`);
+    };
+    const onDragLeave = (ev: DragEvent) => {
+      const related = ev.relatedTarget as Node | null;
+      if (related && root.contains(related)) {
+        return;
+      }
+      root.classList.remove(`${config.addonRef}-drop-target`);
+    };
+    const onDrop = (ev: DragEvent) => {
+      root.classList.remove(`${config.addonRef}-drop-target`);
+      if (!dataTransferHasItems(ev.dataTransfer)) {
+        return;
+      }
+      ev.preventDefault();
+      ev.stopPropagation();
+      const items = itemsFromDataTransfer(ev.dataTransfer);
+      if (!items.length || !this.canvas || !this.renderer) {
+        return;
+      }
+      const rect = this.canvas.getBoundingClientRect();
+      const world = this.renderer.screenToWorld(
+        ev.clientX - rect.left,
+        ev.clientY - rect.top,
+      );
+      void this.handleItemDrop(items, world);
+    };
+    const onDragEnd = () => {
+      root.classList.remove(`${config.addonRef}-drop-target`);
+    };
+
+    root.addEventListener("dragover", onDragOver);
+    root.addEventListener("dragleave", onDragLeave);
+    root.addEventListener("drop", onDrop);
+    root.addEventListener("dragend", onDragEnd);
+    this.dropCleanups.push(
+      () => root.removeEventListener("dragover", onDragOver),
+      () => root.removeEventListener("dragleave", onDragLeave),
+      () => root.removeEventListener("drop", onDrop),
+      () => root.removeEventListener("dragend", onDragEnd),
+    );
+  }
+
+  private async handleItemDrop(
+    items: Zotero.Item[],
+    at: { x: number; y: number },
+  ): Promise<void> {
+    const libraryID = items[0]?.libraryID;
+    if (libraryID == null) {
+      return;
+    }
+    if (
+      !addon.data.scene ||
+      addon.data.scene.libraryID !== libraryID ||
+      addon.data.scene.nodes.size === 0
+    ) {
+      await addon.data.bridge?.loadLibrary(libraryID);
+    }
+    const count = addon.data.bridge?.addItems(items, at) ?? 0;
+    if (count > 0) {
+      new ztoolkit.ProgressWindow(config.addonName)
+        .createLine({
+          text: getString("board-added", { args: { count } }),
+          type: "success",
+        })
+        .show();
+    }
   }
 
   /** Mirror the shared scene filter into this board's toolbar controls. */
@@ -288,19 +604,16 @@ export class Board {
     if (!this.canvas || !this.renderer || !this.root || this.destroyed) {
       return;
     }
+    const view = this.view();
     const wrap = this.canvas.parentElement!;
     const rect = wrap.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
       // The tab pane may not be laid out yet (e.g. right after Tabs.add).
       // Retry on the next frames until it has real dimensions.
-      this.win.requestAnimationFrame(() => this.syncSize());
+      view.requestAnimationFrame(() => this.syncSize());
       return;
     }
-    this.renderer.resize(
-      rect.width,
-      rect.height,
-      this.win.devicePixelRatio || 1,
-    );
+    this.renderer.resize(rect.width, rect.height, view.devicePixelRatio || 1);
   }
 
   /** Called by hooks when the data bridge changed the scene. */
@@ -386,31 +699,80 @@ export class Board {
     this.zoomToFit();
   }
 
-  destroy(): void {
-    if (this.destroyed) {
-      return;
-    }
-    this.destroyed = true;
+  /**
+   * Tear down the mounted UI without marking the board destroyed, so it can
+   * be remounted in another host (pop-out / dock).
+   *
+   * Clears `host` before closing the tab/window so their unload/onClose
+   * handlers do not treat this as a user close and call destroy().
+   */
+  private unmount(options: {
+    closeTab?: boolean;
+    closeWindow?: boolean;
+  } = {}): void {
+    const wasTab = this.host === "tab";
+    const wasWindow = this.host === "window";
+    const tabID = this.tabID;
+    const chromeWin = this.chromeWin;
+
     this.unsubscribeScene?.();
+    this.unsubscribeScene = undefined;
     this.resizeObserver?.disconnect();
+    this.resizeObserver = undefined;
     this.interaction?.dispose();
+    this.interaction = undefined;
     this.renderer?.cancel();
-    if (this.tabID) {
-      const tabID = this.tabID;
-      this.tabID = undefined;
-      try {
-        this.win.Zotero_Tabs.close(tabID);
-      } catch (e) {
-        // Tab may already be closing.
-      }
+    this.renderer = undefined;
+    for (const cleanup of this.dropCleanups) {
+      cleanup();
     }
+    this.dropCleanups = [];
     this.root?.remove();
     this.root = undefined;
     this.canvas = undefined;
     this.filterInput = undefined;
     this.filterClearBtn = undefined;
     this.notesBtn = undefined;
-    this.renderer = undefined;
-    this.interaction = undefined;
+    this.statusEl = undefined;
+
+    this.host = null;
+    this.hostWin = undefined;
+    this.tabID = undefined;
+    this.chromeWin = undefined;
+
+    if (options.closeTab && wasTab && tabID) {
+      try {
+        this.mainWin.Zotero_Tabs.close(tabID);
+      } catch {
+        // Tab may already be closing.
+      }
+    }
+
+    if (options.closeWindow && wasWindow && chromeWin) {
+      this.closingChrome = true;
+      try {
+        if (isWindowAlive(chromeWin)) {
+          chromeWin.close();
+        }
+      } catch {
+        // Window may already be closing.
+      }
+      this.closingChrome = false;
+    }
+  }
+
+  destroy(options: { skipCloseHost?: boolean } = {}): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.destroyed = true;
+    const key = this.mapKey;
+    this.unmount({
+      closeTab: this.host === "tab" && !options.skipCloseHost,
+      closeWindow: this.host === "window" && !options.skipCloseHost,
+    });
+    if (addon.data.boards.get(key) === this) {
+      addon.data.boards.delete(key);
+    }
   }
 }
