@@ -21,17 +21,41 @@
 
 .spatialworkspace-toolbar button {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 1px solid var(--fill-quinary, rgba(0, 0, 0, 0.15));
   border-radius: 4px;
   background: transparent;
   color: inherit;
   padding: 3px 10px;
   font-size: 12px;
+  line-height: 1.2;
   cursor: pointer;
 }
 
 .spatialworkspace-toolbar button:hover {
   background: var(--fill-quinary, rgba(0, 0, 0, 0.06));
+}
+
+.spatialworkspace-toolbar button:active {
+  background: var(--fill-quarternary, rgba(0, 0, 0, 0.1));
+}
+
+.spatialworkspace-btn-icon {
+  flex: none;
+  display: block;
+}
+
+/* Pressed state for toggle buttons (e.g. Notes). */
+.spatialworkspace-toolbar button.spatialworkspace-btn-active {
+  background: var(--color-accent10, rgba(47, 111, 237, 0.12));
+  border-color: var(--color-accent, #2f6fed);
+  color: var(--color-accent, #2f6fed);
+}
+
+.spatialworkspace-toolbar button.spatialworkspace-btn-active:hover {
+  background: var(--color-accent20, rgba(47, 111, 237, 0.2));
 }
 
 .spatialworkspace-status {
@@ -58,7 +82,7 @@
 }
 
 .spatialworkspace-filter-clear {
-  padding: 3px 8px;
+  padding: 3px 6px;
 }
 
 .spatialworkspace-canvas-wrap {

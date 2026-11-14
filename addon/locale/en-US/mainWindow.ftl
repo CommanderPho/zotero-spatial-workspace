@@ -1,17 +1,4 @@
 menuitem-open-board = Open Spatial Workspace
 menuitem-add-to-board = Add to Spatial Workspace
-board-toolbar-arrange =
-    .label = Auto-arrange
-    .tooltiptext = Lay cards out in tidy grids inside their folder regions
-board-toolbar-fit =
-    .label = Fit
-    .tooltiptext = Zoom to fit the whole board
-board-toolbar-notes =
-    .label = Notes
-    .tooltiptext = Show or hide note cards
 board-filter-placeholder =
     .placeholder = Filter: title, added:>2024, read:<30d…
-    .tooltiptext = Temporarily hide non-matching cards. Terms: title:, author:, type:, kind:, added:, modified:, read: with dates (2024-05-01, >7d, never, any). Esc clears.
-board-filter-clear =
-    .label = ✕
-    .tooltiptext = Clear the filter and show all cards

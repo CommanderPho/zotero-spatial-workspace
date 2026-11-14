@@ -5,6 +5,7 @@
  */
 
 import { config } from "../../package.json";
+import type { FluentMessageId } from "../../typings/i10n";
 import { getString, getLocaleID } from "../utils/locale";
 import { getPref, setPref } from "../utils/prefs";
 import type { SceneStore } from "./scene";
@@ -15,6 +16,50 @@ import { Interaction } from "./interaction";
 
 const TAB_TYPE = `${config.addonRef}-board`;
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Stroke-based 16px toolbar icons (currentColor, so they follow the theme). */
+const TOOLBAR_ICONS: Record<string, string[]> = {
+  // 2x2 grid of cards: auto-arrange
+  arrange: [
+    "M2.5 2.5h4.5v4.5H2.5z",
+    "M9 2.5h4.5v4.5H9z",
+    "M2.5 9h4.5v4.5H2.5z",
+    "M9 9h4.5v4.5H9z",
+  ],
+  // Four corners framing the board: zoom to fit
+  fit: ["M6 2.5H2.5V6", "M10 2.5h3.5V6", "M6 13.5H2.5V10", "M10 13.5h3.5V10"],
+  // Sticky note with folded corner: notes toggle
+  notes: [
+    "M3 2.5h10v7.5l-3.5 3.5H3z",
+    "M9.5 13.5V10H13",
+    "M5.5 6h5",
+    "M5.5 8.5h3",
+  ],
+  // Cross: clear filter
+  clear: ["M4 4l8 8", "M12 4l-8 8"],
+};
+
+function createToolbarIcon(doc: Document, name: string): Element {
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.4");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add(`${config.addonRef}-btn-icon`);
+  for (const d of TOOLBAR_ICONS[name] ?? []) {
+    const path = doc.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
 export class Board {
   readonly win: _ZoteroTypes.MainWindow;
   private scene: SceneStore;
@@ -24,6 +69,7 @@ export class Board {
   private statusEl?: HTMLElement;
   private filterInput?: HTMLInputElement;
   private filterClearBtn?: HTMLButtonElement;
+  private notesBtn?: HTMLButtonElement;
   private renderer?: Renderer2D;
   private interaction?: Interaction;
   private resizeObserver?: ResizeObserver;
@@ -79,16 +125,26 @@ export class Board {
     const toolbar = ztoolkit.UI.createElement(doc, "div", {
       classList: [`${config.addonRef}-toolbar`],
     });
-    const arrangeBtn = this.toolbarButton(doc, "board-toolbar-arrange", () =>
-      this.autoArrange(),
+    const arrangeBtn = this.toolbarButton(
+      doc,
+      "arrange",
+      "board-toolbar-arrange",
+      () => this.autoArrange(),
     );
-    const fitBtn = this.toolbarButton(doc, "board-toolbar-fit", () =>
+    const fitBtn = this.toolbarButton(doc, "fit", "board-toolbar-fit", () =>
       this.zoomToFit(),
     );
-    const notesBtn = this.toolbarButton(doc, "board-toolbar-notes", () => {
-      setPref("showNotes", getPref("showNotes") === false);
-      this.refresh();
-    });
+    const notesBtn = this.toolbarButton(
+      doc,
+      "notes",
+      "board-toolbar-notes",
+      () => {
+        setPref("showNotes", getPref("showNotes") === false);
+        this.refresh();
+      },
+    );
+    notesBtn.setAttribute("aria-pressed", "true");
+    this.notesBtn = notesBtn;
 
     // Temporary visibility filter: hides non-matching cards without
     // touching positions or the saved layout.
@@ -97,6 +153,7 @@ export class Board {
       attributes: {
         type: "search",
         "data-l10n-id": getLocaleID("board-filter-placeholder"),
+        title: getString("board-filter-tooltip"),
       },
       listeners: [
         {
@@ -116,8 +173,12 @@ export class Board {
       ],
     });
     this.filterInput = filterInput;
-    const filterClearBtn = this.toolbarButton(doc, "board-filter-clear", () =>
-      this.clearFilter(),
+    const filterClearBtn = this.toolbarButton(
+      doc,
+      "clear",
+      "board-filter-clear",
+      () => this.clearFilter(),
+      true,
     );
     filterClearBtn.classList.add(`${config.addonRef}-filter-clear`);
     filterClearBtn.style.display = "none";
@@ -177,6 +238,7 @@ export class Board {
       this.syncFilterUI();
     });
     this.syncFilterUI();
+    this.syncNotesButton();
     this.updateStatus();
     this.renderer.requestDraw();
   }
@@ -192,15 +254,33 @@ export class Board {
     }
   }
 
+  /**
+   * HTML toolbar button with an inline SVG icon and a localized text label.
+   * Labels are set as textContent (not Fluent `.label`, which only works on
+   * XUL elements); tooltips use the native `title` attribute.
+   */
   private toolbarButton(
     doc: Document,
-    l10nKey: Parameters<typeof getLocaleID>[0],
+    icon: string,
+    labelKey: FluentMessageId,
     onClick: () => void,
+    iconOnly = false,
   ): HTMLButtonElement {
     const button = ztoolkit.UI.createElement(doc, "button", {
-      attributes: { "data-l10n-id": getLocaleID(l10nKey) },
+      attributes: {
+        type: "button",
+        title: getString(`${labelKey}-tooltip` as FluentMessageId),
+      },
       listeners: [{ type: "click", listener: () => onClick() }],
     });
+    button.appendChild(createToolbarIcon(doc, icon));
+    if (!iconOnly) {
+      const label = doc.createElement("span");
+      label.textContent = getString(labelKey);
+      button.appendChild(label);
+    } else {
+      button.setAttribute("aria-label", getString(labelKey));
+    }
     return button;
   }
 
@@ -231,7 +311,18 @@ export class Board {
 
   /** Re-read prefs and redraw (e.g. after a preference change). */
   refresh(): void {
+    this.syncNotesButton();
     this.renderer?.requestDraw();
+  }
+
+  /** Reflect the showNotes pref in the toolbar toggle's pressed state. */
+  private syncNotesButton(): void {
+    if (!this.notesBtn) {
+      return;
+    }
+    const shown = getPref("showNotes") !== false;
+    this.notesBtn.setAttribute("aria-pressed", String(shown));
+    this.notesBtn.classList.toggle(`${config.addonRef}-btn-active`, shown);
   }
 
   /** Apply a temporary visibility filter from the toolbar query text. */
@@ -318,6 +409,7 @@ export class Board {
     this.canvas = undefined;
     this.filterInput = undefined;
     this.filterClearBtn = undefined;
+    this.notesBtn = undefined;
     this.renderer = undefined;
     this.interaction = undefined;
   }

@@ -6,7 +6,7 @@
  *   (dirty flag) or the viewport resizes. No idle rAF loop.
  * - Viewport culling through the scene's spatial hash.
  * - Level-of-detail labels: text is dropped below zoom thresholds and
- *   truncated with cached measurements.
+ *   wrapped/truncated with cached measurements.
  * - Draw order: regions, note links, item cards, note cards, selection,
  *   marquee.
  */
@@ -26,6 +26,8 @@ const MAX_ZOOM = 4;
 const TEXT_ZOOM = 0.35;
 /** Below this zoom, only titles (no subtitles) are drawn. */
 const SUBTITLE_ZOOM = 0.6;
+/** Line height of the 13px card title (two lines max). */
+const TITLE_LINE_H = 17;
 
 const COLORS = {
   background: "#f6f7f9",
@@ -63,6 +65,7 @@ export class Renderer2D {
   private lastMarquee: Rect | null = null;
   private rafID = 0;
   private truncateCache = new Map<string, string>();
+  private wrapCache = new Map<string, string[]>();
   /** Marquee rect in world coordinates, set by interaction while dragging. */
   marquee: Rect | null = null;
 
@@ -338,8 +341,12 @@ export class Renderer2D {
     ctx.fillStyle = COLORS.cardTitle;
     ctx.font = `600 13px system-ui, sans-serif`;
     ctx.textBaseline = "top";
-    const title = this.truncate(node.title, node.w - 28, ctx);
-    ctx.fillText(title, node.x + 20, node.y + 10);
+    // Paper titles are long: wrap to at most two lines, spending the
+    // card's vertical white space instead of truncating after one line.
+    const titleLines = this.wrapTitle(node.title, node.w - 28, 2, ctx);
+    titleLines.forEach((line, i) => {
+      ctx.fillText(line, node.x + 20, node.y + 10 + i * TITLE_LINE_H);
+    });
 
     const showSubtitle =
       options.labelDetail === "full" || zoom >= SUBTITLE_ZOOM;
@@ -347,7 +354,10 @@ export class Renderer2D {
       ctx.fillStyle = COLORS.cardSubtitle;
       ctx.font = `11px system-ui, sans-serif`;
       const subtitle = this.truncate(node.subtitle, node.w - 28, ctx);
-      ctx.fillText(subtitle, node.x + 20, node.y + 30);
+      // Follow the title block: right below one line, below two lines
+      // when the title wrapped.
+      const subtitleY = node.y + 10 + titleLines.length * TITLE_LINE_H + 4;
+      ctx.fillText(subtitle, node.x + 20, subtitleY);
     }
     if (showSubtitle && node.badge) {
       ctx.fillStyle = COLORS.cardSubtitle;
@@ -450,6 +460,29 @@ export class Renderer2D {
     this.truncateCache.set(key, result);
     return result;
   }
+
+  /**
+   * Wrap text to at most `maxLines` lines, ellipsizing the last line when
+   * the text overflows. Results cached per font+width+text like truncate().
+   */
+  private wrapTitle(
+    text: string,
+    maxWidth: number,
+    maxLines: number,
+    ctx: CanvasRenderingContext2D,
+  ): string[] {
+    const key = `${ctx.font}|${maxWidth}|${maxLines}|${text}`;
+    const cached = this.wrapCache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const lines = wrapText(ctx, text, maxWidth, maxLines);
+    if (this.wrapCache.size > 20000) {
+      this.wrapCache.clear();
+    }
+    this.wrapCache.set(key, lines);
+    return lines;
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -473,35 +506,52 @@ function roundRect(
   ctx.closePath();
 }
 
+/**
+ * Word-wrap to at most `maxLines` lines. When text overflows, the last
+ * line is ellipsized to fit (binary search over characters, so even a
+ * single word longer than the line is handled).
+ */
 function wrapText(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,
   maxLines: number,
 ): string[] {
-  const words = text.split(" ");
+  const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let line = "";
-  for (const word of words) {
-    const candidate = line ? line + " " + word : word;
+  let i = 0;
+  while (i < words.length && lines.length < maxLines) {
+    const candidate = line ? line + " " + words[i] : words[i];
     if (ctx.measureText(candidate).width <= maxWidth || !line) {
       line = candidate;
+      i++;
     } else {
       lines.push(line);
-      line = word;
-      if (lines.length === maxLines) {
-        break;
-      }
+      line = "";
     }
   }
-  if (lines.length < maxLines && line) {
+  if (line && lines.length < maxLines) {
     lines.push(line);
   }
-  if (lines.length === maxLines) {
-    const last = lines[maxLines - 1];
-    if (ctx.measureText(last).width > maxWidth) {
-      lines[maxLines - 1] = last.slice(0, Math.max(1, last.length - 1)) + "…";
+  if (lines.length === 0) {
+    return lines;
+  }
+  const last = lines.length - 1;
+  const overflow = i < words.length;
+  if (overflow || ctx.measureText(lines[last]).width > maxWidth) {
+    // Ellipsize the final line, keeping as much of it as fits.
+    let lo = 0;
+    let hi = lines[last].length;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (ctx.measureText(lines[last].slice(0, mid) + "…").width <= maxWidth) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
     }
+    lines[last] = lines[last].slice(0, Math.max(lo, 1)) + "…";
   }
   return lines;
 }

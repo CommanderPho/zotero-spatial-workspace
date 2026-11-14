@@ -55,6 +55,31 @@ describe("startup", function () {
     assert.isNotNull(canvas, "board canvas should be mounted");
     assert.instanceOf(canvas, win.HTMLCanvasElement);
 
+    // Toolbar buttons must render visible labels and icons. Fluent `.label`
+    // only works on XUL elements; these are HTML buttons, so labels are set
+    // as textContent and icons are inline SVG.
+    const buttons = win.document.querySelectorAll(
+      `.${config.addonRef}-toolbar button`,
+    );
+    assert.isAtLeast(buttons.length, 3, "toolbar should have its buttons");
+    for (const button of buttons) {
+      if (button.classList.contains(`${config.addonRef}-filter-clear`)) {
+        continue; // icon-only, hidden until a filter is active
+      }
+      assert.isNotEmpty(
+        button.textContent?.trim(),
+        "toolbar button should have a visible text label",
+      );
+      assert.isNotNull(
+        button.querySelector("svg"),
+        "toolbar button should have an icon",
+      );
+      assert.isNotEmpty(
+        button.getAttribute("title"),
+        "toolbar button should have a tooltip",
+      );
+    }
+
     const scene = instance.data.scene!;
     assert.isTrue(scene.nodes.has(`c${collection.id}`), "collection region");
     assert.isTrue(scene.nodes.has(`i${itemID}`), "item card");

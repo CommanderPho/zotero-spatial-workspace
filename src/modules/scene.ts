@@ -63,7 +63,12 @@ export interface Camera {
   zoom: number;
 }
 
-export const CARD_W = 220;
+/**
+ * Item card width: 1.7x the original 220 so long paper titles fit on two
+ * lines instead of truncating after a handful of words. Height is
+ * unchanged; the second title line uses the card's vertical white space.
+ */
+export const CARD_W = 374;
 export const CARD_H = 92;
 export const NOTE_W = 180;
 export const NOTE_H = 76;

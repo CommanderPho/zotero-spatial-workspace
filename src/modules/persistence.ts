@@ -8,7 +8,7 @@
  */
 
 import { getPref } from "../utils/prefs";
-import type { Camera, SceneNode, SceneStore } from "./scene";
+import { CARD_W, type Camera, type SceneNode, type SceneStore } from "./scene";
 
 const DIR_NAME = "spatialworkspace";
 /**
@@ -16,8 +16,14 @@ const DIR_NAME = "spatialworkspace";
  * stored positions from the old fixed-grid algorithm, where large regions
  * overlapped their neighbours; those positions are discarded on load so the
  * board is re-laid-out once with the fixed algorithm.
+ * v3: item cards grew to 1.7x their old width (374 vs 220) for two-line
+ * titles. v2 x positions were spaced for the narrow cards, so they are
+ * scaled by the same factor (heights unchanged); the arrangement and the
+ * camera are kept.
  */
-const LAYOUT_VERSION = 2;
+const LAYOUT_VERSION = 3;
+/** Card width used by v1/v2 layouts, before the two-line-title widening. */
+const LEGACY_CARD_W = 220;
 
 interface LayoutFile {
   version: number;
@@ -75,6 +81,20 @@ export class LayoutStore {
       if (data.version === 1) {
         // Overlapping v1 positions: re-layout, but keep the user's camera.
         return { ...data, version: LAYOUT_VERSION, nodes: [] };
+      }
+      if (data.version === 2) {
+        // v2 spaced cards for the old 220px width. Scale x by the width
+        // ratio so the wider cards keep the same arrangement without
+        // overlapping; heights and the camera are unchanged.
+        const scale = CARD_W / LEGACY_CARD_W;
+        return {
+          ...data,
+          version: LAYOUT_VERSION,
+          camera: data.camera
+            ? { ...data.camera, x: data.camera.x * scale }
+            : data.camera,
+          nodes: data.nodes.map((n) => ({ ...n, x: n.x * scale })),
+        };
       }
       return null;
     } catch (e) {

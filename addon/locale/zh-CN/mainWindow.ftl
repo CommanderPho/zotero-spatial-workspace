@@ -1,17 +1,4 @@
 menuitem-open-board = 打开空间工作区
 menuitem-add-to-board = 添加到空间工作区
-board-toolbar-arrange =
-    .label = 自动排列
-    .tooltiptext = 在文件夹区域内以整齐网格排列卡片
-board-toolbar-fit =
-    .label = 适应视图
-    .tooltiptext = 缩放以显示整个面板
-board-toolbar-notes =
-    .label = 笔记
-    .tooltiptext = 显示或隐藏笔记卡片
 board-filter-placeholder =
     .placeholder = 筛选：标题、added:>2024、read:<30d…
-    .tooltiptext = 临时隐藏不匹配的卡片。可用条件：title:、author:、type:、kind:、added:、modified:、read:，支持日期（2024-05-01、>7d、never、any）。按 Esc 清除。
-board-filter-clear =
-    .label = ✕
-    .tooltiptext = 清除筛选并显示所有卡片
